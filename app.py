@@ -71,12 +71,13 @@ RHO_MAX_COL = 0.08
 
 def _find_number(text: str, patterns, default=None):
     """
-    Robust: returns first capture group that can be parsed as float.
-    Works even if earlier groups are non-numeric like 'fc' or 'fy'.
+    Robust: returns the first capture group in the regex match that can be parsed as float.
+    This prevents errors when group(1) is a word like 'fc' and group(2) is the number.
     """
     for pat in patterns:
         m = re.search(pat, text, flags=re.IGNORECASE)
         if m:
+            # Try groups from last to first, pick the first numeric one
             for gi in range(m.lastindex, 0, -1):
                 try:
                     return float(m.group(gi))
