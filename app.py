@@ -6,19 +6,19 @@
 #   - Short tied column (P-M interaction; perimeter rebar layout)
 #   - One-way slab design (12-in strip)
 #
-# UI (this version):
+# UI:
 #   - Sidebar inputs + equal-size buttons
 #   - Beam output shown in two equal-height panels:
 #       (A) Beam flexural/shear narrative
 #       (B) Key outputs
-#   - Design Sketch (section only, larger):
+#   - Design Sketch (section only):
 #       - Rectangular or T-beam outline
 #       - Dimensions (b, h, and for T-beam bf, bw, hf)
 #       - Tension steel on correct face (+/- moment)
 #       - Rebar label (n and bar size)
 #       - Compression block depth a, neutral axis c, effective depth d (teaching visuals)
 #
-# Optional "Auto beff" for T-beams:
+# Optional "Auto beff" (effective compression flange width) for T-beams:
 #   be (each side) = min(Ln/8, 8hf, sw/2)
 #   bf = bw + 2be
 #
