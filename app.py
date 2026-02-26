@@ -779,6 +779,9 @@ def slab_design_one_way(inp):
     b = 12.0
     h = t_in
 
+    # ACI Shrinkage and Temperature minimum steel (Grade 60 assumed for teaching)
+    As_min_req = 0.0018 * b * h
+
     w_plf = wu_psf * 1.0
     if inp["slab_support"] == "continuous":
         Mu_kipft = (w_plf * (L_ft ** 2) / 12.0) / 1000.0
@@ -789,6 +792,10 @@ def slab_design_one_way(inp):
 
     phi = 0.90
     candidates = []
+
+    # ACI Max spacing limit: lesser of 3h or 18 in
+    s_max_limit = min(3.0 * h, 18.0)
+
     for bar in ["#4", "#5"]:
         Ab = BAR_DB[bar]["area"]
         db = BAR_DB[bar]["dia"]
@@ -796,9 +803,13 @@ def slab_design_one_way(inp):
         if d <= 0:
             continue
 
-        for s in range(4, 19):
+        for s in range(4, int(math.floor(s_max_limit)) + 1):
             As_per_ft = Ab * (12.0 / s)
             As = As_per_ft
+
+            # Skip if it doesn't meet minimum T&S steel
+            if As < As_min_req:
+                continue
 
             a = As * fy / (0.85 * fc * b)
             ybar = a / 2.0
@@ -820,7 +831,7 @@ def slab_design_one_way(inp):
                 break
 
     if not candidates:
-        warnings.append("Slab: could not find #4/#5 spacing to satisfy moment under assumptions.")
+        warnings.append("Slab: could not find #4/#5 spacing to satisfy moment AND minimum steel under assumptions.")
         return None, warnings, steps
 
     best = sorted(candidates, key=lambda x: (-x["s_in"], x["bar"]))[0]
@@ -949,8 +960,8 @@ def draw_design_sketch_section(flex: dict):
         bw = b_web
         bf = b_total
 
-    # Bigger figure (single sketch)
-    fig, ax = plt.subplots(figsize=(11.5, 6.5))
+    # Half-sized figure (single sketch)
+    fig, ax = plt.subplots(figsize=(5.75, 3.25))
 
     # Coordinate convention: y from bottom (0) to top (h)
     # Draw section
@@ -1252,79 +1263,79 @@ else:
             for s in steps:
                 st.write(f"- {s}")
 
-# Beam
-if result["member_type"] == "beam":
-    colL, colR = st.columns([1, 1], gap="large")
+    # Beam
+    if result["member_type"] == "beam":
+        colL, colR = st.columns([1, 1], gap="large")
 
-    # Build narrative text (single string)
-    narrative_parts = []
-    if "flexure_narrative" in result:
-        narrative_parts.append("=== FLEXURE ===\n" + result["flexure_narrative"])
-    if "shear_narrative" in result:
-        narrative_parts.append("\n=== SHEAR ===\n" + result["shear_narrative"])
-    narrative_text = "\n".join(narrative_parts).strip()
+        # Build narrative text (single string)
+        narrative_parts = []
+        if "flexure_narrative" in result:
+            narrative_parts.append("=== FLEXURE ===\n" + result["flexure_narrative"])
+        if "shear_narrative" in result:
+            narrative_parts.append("\n=== SHEAR ===\n" + result["shear_narrative"])
+        narrative_text = "\n".join(narrative_parts).strip()
 
-    # Build key outputs dict
-    out = {}
-    if "flexure" in result:
-        f = result["flexure"]
-        out.update({
-            "Flexure shape": f["shape"],
-            "Moment sign": f["moment_sign"],
-            "Bars": f"{f['n']} {f['bar']}",
-            "As (in^2)": round(f["As_prov"], 2),
-            "d (in)": round(f["d_in"], 2),
-            "a (in)": round(f["a_in"], 2),
-            "c (in)": round(f["c_in"], 2),
-            "phi": round(f["phi"], 3),
-            "phiMn (kip-ft)": round(f["phiMn_kipft"], 1),
-        })
-        if f["shape"] == "T-beam":
+        # Build key outputs dict
+        out = {}
+        if "flexure" in result:
+            f = result["flexure"]
             out.update({
-                "bw (in)": f["bw_in"],
-                "bf (in)": f["bf_in"],
-                "hf (in)": f["hf_in"],
-                "Auto beff?": f.get("auto_beff", False),
-                "bf_auto (in)": (None if f.get("bf_auto_in") is None else round(f["bf_auto_in"], 1)),
-                "bf_auto used?": f.get("bf_auto_used", False),
+                "Flexure shape": f["shape"],
+                "Moment sign": f["moment_sign"],
+                "Bars": f"{f['n']} {f['bar']}",
+                "As (in^2)": round(f["As_prov"], 2),
+                "d (in)": round(f["d_in"], 2),
+                "a (in)": round(f["a_in"], 2),
+                "c (in)": round(f["c_in"], 2),
+                "phi": round(f["phi"], 3),
+                "phiMn (kip-ft)": round(f["phiMn_kipft"], 1),
             })
-    if "shear" in result:
-        sh = result["shear"]
-        out.update({
-            "Vu (kips)": result["inputs"]["Vu_kips"],
-            "Vc (kips)": round(sh["Vc_kips"], 1),
-            "phiVc (kips)": round(sh["phiVc_kips"], 1),
-            "Stirrups": ("N/A" if sh["s_use_in"] is None else f"{sh['legs']}-leg {sh['stirrup_size']} @ {sh['s_use_in']:.1f} in"),
-        })
+            if f["shape"] == "T-beam":
+                out.update({
+                    "bw (in)": f["bw_in"],
+                    "bf (in)": f["bf_in"],
+                    "hf (in)": f["hf_in"],
+                    "Auto beff?": f.get("auto_beff", False),
+                    "bf_auto (in)": (None if f.get("bf_auto_in") is None else round(f["bf_auto_in"], 1)),
+                    "bf_auto used?": f.get("bf_auto_used", False),
+                })
+        if "shear" in result:
+            sh = result["shear"]
+            out.update({
+                "Vu (kips)": result["inputs"]["Vu_kips"],
+                "Vc (kips)": round(sh["Vc_kips"], 1),
+                "phiVc (kips)": round(sh["phiVc_kips"], 1),
+                "Stirrups": ("N/A" if sh["s_use_in"] is None else f"{sh['legs']}-leg {sh['stirrup_size']} @ {sh['s_use_in']:.1f} in"),
+            })
 
-    # Render equal-height panels using HTML (works reliably)
-    with colL:
-        st.markdown(
-            f"""
-            <div class="panel">
-              <h4>Beam Narrative</h4>
-              <pre>{html.escape(narrative_text if narrative_text else "No narrative available.")}</pre>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        # Render equal-height panels using HTML (works reliably)
+        with colL:
+            st.markdown(
+                f"""
+                <div class="panel">
+                  <h4>Beam Narrative</h4>
+                  <pre>{html.escape(narrative_text if narrative_text else "No narrative available.")}</pre>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-    with colR:
-        st.markdown(
-            f"""
-            <div class="panel">
-              <h4>Key Outputs</h4>
-              <pre>{html.escape(json.dumps(out, indent=2))}</pre>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        with colR:
+            st.markdown(
+                f"""
+                <div class="panel">
+                  <h4>Key Outputs</h4>
+                  <pre>{html.escape(json.dumps(out, indent=2))}</pre>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-    # Design Sketch (smaller)
-    if st.session_state.show_sketch and "flexure" in result:
-        st.markdown("### Design Sketch")
-        fig = draw_design_sketch_section(result["flexure"])
-        st.pyplot(fig, use_container_width=False)
+        # Design Sketch (smaller)
+        if st.session_state.show_sketch and "flexure" in result:
+            st.markdown("### Design Sketch")
+            fig = draw_design_sketch_section(result["flexure"])
+            st.pyplot(fig, use_container_width=False)
 
     # Column
     elif result["member_type"] == "column":
@@ -1343,7 +1354,7 @@ if result["member_type"] == "beam":
         })
 
     # Slab
-    else:
+    elif result["member_type"] == "slab":
         st.markdown("#### Narrative")
         st.code(result["narrative"])
         sres = result["slab"]
