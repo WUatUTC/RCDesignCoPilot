@@ -2,22 +2,25 @@
 # RC DESIGN COPILOT — (ACI 318-19 teaching version)
 # Streamlit + Agent + Skills:
 #   - Beam flexure (Rect or T-beam; positive or negative moment)
-#   - Beam shear (one-way; can run standalone)
+#   - Beam shear (ACI beam shear; can run standalone)
 #   - Short tied column (P-M interaction; perimeter rebar layout)
 #   - One-way slab design (12-in strip)
 #
-# UI ADDITIONAL FEATURES:
-#   1) Sidebar for inputs + examples
-#   2) Advanced diagram (Option B):
-#       - Beam section sketch (Rect/T)
-#       - Compression block depth a, neutral axis c, effective depth d
-#       - Rebar layer shown on tension face
-#       - Optional strain diagram
+# UI (this version):
+#   - Sidebar inputs + equal-size buttons
+#   - Beam output shown in two equal-height panels:
+#       (A) Beam flexural/shear narrative
+#       (B) Key outputs
+#   - Design Sketch (section only, larger):
+#       - Rectangular or T-beam outline
+#       - Dimensions (b, h, and for T-beam bf, bw, hf)
+#       - Tension steel on correct face (+/- moment)
+#       - Rebar label (n and bar size)
+#       - Compression block depth a, neutral axis c, effective depth d (teaching visuals)
 #
-# NEW: Optional "Auto beff" for T-beams:
+# Optional "Auto beff" for T-beams:
 #   be (each side) = min(Ln/8, 8hf, sw/2)
 #   bf = bw + 2be
-# Use: "auto beff, Ln=..., sw=..." in prompt.
 #
 # Run:
 #   pip install -r requirements.txt
@@ -324,7 +327,6 @@ def clear_cover_definition_note() -> str:
     )
 
 def effective_depth(h_in: float, cover_in: float, main_bar_dia_in: float, stirrup_dia_in: float = 0.375) -> float:
-    # d ≈ h − cover − stirrup_dia − 0.5*db
     return h_in - cover_in - stirrup_dia_in - 0.5 * main_bar_dia_in
 
 def As_min_beam_us(fc_psi: float, fy_psi: float, b_in: float, d_in: float) -> float:
@@ -339,23 +341,20 @@ def shear_Vc_simple_us(fc_psi: float, bw_in: float, d_in: float, lam: float = 1.
     return (2.0 * lam * math.sqrt(fc_psi) * bw_in * d_in) / 1000.0  # kips
 
 def compute_beff_aci_teaching(bw_in: float, hf_in: float, Ln_in: float, sw_in: float) -> float:
-    # Teaching: be(each side) = min(Ln/8, 8hf, sw/2), bf = bw + 2be
     be = min(Ln_in / 8.0, 8.0 * hf_in, sw_in / 2.0)
     return bw_in + 2.0 * be
 
 
 # ============================================================
-# Beam flexure skill (Rect or T-beam; positive or negative moment)
+# Beam flexure skill
 # ============================================================
 
 def tbeam_compression_resultant(fc_psi: float, bw: float, bf: float, hf: float, a: float):
-    # returns C (lb), ybar (in from top fiber)
     stress = 0.85 * fc_psi
     if a <= hf:
         C = stress * bf * a
         ybar = a / 2.0
         return C, ybar
-
     C1 = stress * bf * hf
     y1 = hf / 2.0
     C2 = stress * bw * (a - hf)
@@ -365,7 +364,6 @@ def tbeam_compression_resultant(fc_psi: float, bw: float, bf: float, hf: float, 
     return C, ybar
 
 def solve_a_from_As_Tbeam(As: float, fy_psi: float, fc_psi: float, bw: float, bf: float, hf: float):
-    # equilibrium: As fy = 0.85 fc' [bf min(a,hf) + bw max(a-hf,0)]
     stress = 0.85 * fc_psi
     a_rect = As * fy_psi / (stress * bf)
     if a_rect <= hf:
@@ -417,7 +415,6 @@ def flexure_design_beam_general(inp):
         db = BAR_DB[bar]["dia"]
         d = effective_depth(h, cover, db, stirrup_dia_in=BAR_DB["#3"]["dia"])
 
-        # iterate bar count
         for n in range(2, 16):
             As = n * Ab
 
@@ -427,7 +424,7 @@ def flexure_design_beam_general(inp):
                 ybar = a / 2.0
             else:
                 if moment_sign == "negative":
-                    # teaching simplification: compression in web
+                    # teaching simplification: compression in web for negative moment
                     b_rect = bw
                     a = As * fy / (0.85 * fc * b_rect)
                     ybar = a / 2.0
@@ -437,7 +434,6 @@ def flexure_design_beam_general(inp):
                     a = solve_a_from_As_Tbeam(As, fy, fc, bw=bw, bf=bf, hf=hf)
                     _C, ybar = tbeam_compression_resultant(fc, bw=bw, bf=bf, hf=hf, a=a)
 
-            # nominal moment
             T = As * fy
             Mn_lbin = T * (d - ybar)
             Mn_kipft = Mn_lbin / (1000.0 * 12.0)
@@ -468,6 +464,7 @@ def flexure_design_beam_general(inp):
                     "Mn_kipft": Mn_kipft,
                     "phiMn_kipft": phiMn,
                     "ybar_in": ybar,
+
                     "bw_in": bw if bw is not None else inp["b_in"],
                     "bf_in": bf,
                     "hf_in": hf,
@@ -493,7 +490,7 @@ def flexure_design_beam_general(inp):
 
 
 # ============================================================
-# Beam shear skill (ACI beam shear; one-way vertical shear)
+# Beam shear skill (ACI beam shear; teaching)
 # ============================================================
 
 def shear_design_beam(inp, d_in: float | None):
@@ -509,7 +506,6 @@ def shear_design_beam(inp, d_in: float | None):
 
     phi_v = 0.75
 
-    # shear-only: estimate d from main bars
     if d_in is None:
         main_bar = inp["long_bar"] if (inp["long_bar"] in BAR_DB) else "#8"
         db = BAR_DB[main_bar]["dia"]
@@ -579,7 +575,7 @@ def shear_design_beam(inp, d_in: float | None):
 
 
 # ============================================================
-# Column skill (perimeter layout + interaction; teaching)
+# Column skill (teaching)
 # ============================================================
 
 def _steel_stress_from_strain(eps: float, fy_psi: float) -> float:
@@ -604,7 +600,6 @@ def column_bar_layout_perimeter(b_in: float, h_in: float, cover_in: float, tie_s
         if p not in pts:
             pts.append(p)
 
-    # corners
     add_unique((xL, yT))
     add_unique((xR, yT))
     add_unique((xR, yB))
@@ -794,8 +789,7 @@ def slab_design_one_way(inp):
     for bar in ["#4", "#5"]:
         Ab = BAR_DB[bar]["area"]
         db = BAR_DB[bar]["dia"]
-        # slab: no stirrups
-        d = h - cover - 0.5 * db
+        d = h - cover - 0.5 * db  # slab: no stirrups
         if d <= 0:
             continue
 
@@ -900,14 +894,27 @@ def narrative_slab(inp, sres):
 
 
 # ============================================================
-# Option B Diagram: section + strain diagram
+# Design Sketch (section only, larger; dimensions + rebar label)
 # ============================================================
 
-def _draw_section_and_strain(flex: dict):
+def _dim_arrow(ax, x1, y1, x2, y2, label, text_offset=(0, 0), fontsize=10):
+    ax.annotate(
+        "",
+        xy=(x2, y2),
+        xytext=(x1, y1),
+        arrowprops=dict(arrowstyle="<->", linewidth=1.5),
+    )
+    xm = 0.5 * (x1 + x2) + text_offset[0]
+    ym = 0.5 * (y1 + y2) + text_offset[1]
+    ax.text(xm, ym, label, fontsize=fontsize, va="center", ha="center")
+
+def draw_design_sketch_section(flex: dict):
     """
-    Advanced teaching figure:
-      Left: cross-section (Rect/T), compression block a, NA c, effective depth d, tension steel.
-      Right: linear strain profile (epsilon) with 0.003 at compression face.
+    Larger, teaching-style cross-section sketch with:
+      - Rectangular or T-beam outline
+      - Dimensions: b, h; (T-beam: bf, bw, hf)
+      - Rebar shown on tension face (+/- moment) with label "n #bar"
+      - a, c, d (teaching labels)
     """
     shape = flex.get("shape", "Rectangular")
     h = float(flex.get("h_in", 24.0))
@@ -936,29 +943,22 @@ def _draw_section_and_strain(flex: dict):
         b_web = float(flex.get("b_in", 12.0))
         b_total = b_web
         hf = 0.0
+        bw = b_web
+        bf = b_total
 
-    # Create figure
-    fig = plt.figure(figsize=(9.5, 4.5))
-    gs = fig.add_gridspec(1, 2, width_ratios=[1.1, 0.9])
-    ax = fig.add_subplot(gs[0, 0])
-    ax2 = fig.add_subplot(gs[0, 1])
+    # Bigger figure (single sketch)
+    fig, ax = plt.subplots(figsize=(11.5, 6.5))
 
-    # ----- SECTION DRAWING -----
-    # Concrete outline
+    # Coordinate convention: y from bottom (0) to top (h)
+    # Draw section
     if shape == "T-beam":
-        # flange
-        flange = patches.Rectangle((-(b_total - b_web)/2.0, h - hf), b_total, hf, fill=False, linewidth=2)
-        web = patches.Rectangle((0, 0), b_web, h - hf, fill=False, linewidth=2)
-        # shift web to align center under flange
-        web.set_x((b_total - b_web)/2.0)
-        flange.set_x(0.0)
-        ax.add_patch(web)
+        # Draw flange and web with web centered under flange
+        web_left = (b_total - b_web) / 2.0
+        flange = patches.Rectangle((0, h - hf), b_total, hf, fill=False, linewidth=2)
+        web = patches.Rectangle((web_left, 0), b_web, h - hf, fill=False, linewidth=2)
         ax.add_patch(flange)
-        x0 = 0.0
-        y0 = 0.0
-        sec_left = 0.0
-        sec_right = b_total
-        web_left = (b_total - b_web)/2.0
+        ax.add_patch(web)
+        sec_left, sec_right = 0.0, b_total
         web_right = web_left + b_web
     else:
         rect = patches.Rectangle((0, 0), b_total, h, fill=False, linewidth=2)
@@ -966,122 +966,84 @@ def _draw_section_and_strain(flex: dict):
         sec_left, sec_right = 0.0, b_total
         web_left, web_right = sec_left, sec_right
 
-    # Compression block a (from compression face)
-    # We'll draw it as shaded rectangle (no color specification required; default gray)
-    if a > 0 and a < h:
+    # Compression block shading (teaching visual)
+    if 0 < a < h:
         if compression_face == "top":
-            y_comp0 = h - a
-            height_comp = a
+            y0 = h - a
+            height = a
         else:
-            y_comp0 = 0.0
-            height_comp = a
+            y0 = 0.0
+            height = a
 
-        # For T-beam: approximate compression block width as bf (teaching visual)
-        comp_width = b_total if (shape == "T-beam" and tension_face == "bottom") else b_web
-        comp_left = sec_left if comp_width == b_total else web_left
+        # For a visual: use bf in positive T-beam; otherwise use web width
+        if (shape == "T-beam") and (moment_sign == "positive"):
+            comp_left, comp_w = 0.0, b_total
+        else:
+            comp_left, comp_w = web_left, (web_right - web_left)
 
-        comp = patches.Rectangle((comp_left, y_comp0), comp_width, height_comp, fill=True, alpha=0.15, linewidth=0)
+        comp = patches.Rectangle((comp_left, y0), comp_w, height, fill=True, alpha=0.12, linewidth=0)
         ax.add_patch(comp)
 
-        # Label a
-        ax.annotate(
-            f"a={a:.2f} in",
-            xy=(sec_right + 0.3, (y_comp0 + height_comp/2)),
-            va="center"
-        )
+        # a label
+        ax.text(sec_right + 0.8, y0 + 0.5 * height, f"a={a:.2f} in", va="center")
 
-    # Neutral axis at depth c from compression face
-    if c > 0 and c < h:
+    # Neutral axis c (dashed)
+    if 0 < c < h:
         y_na = (h - c) if compression_face == "top" else c
         ax.plot([sec_left, sec_right], [y_na, y_na], linestyle="--", linewidth=1.5)
-        ax.annotate(
-            f"c={c:.2f} in (NA)",
-            xy=(sec_right + 0.3, y_na),
-            va="center"
-        )
+        ax.text(sec_right + 0.8, y_na, f"c={c:.2f} in", va="center")
 
     # Tension steel layer position
     if tension_face == "bottom":
         y_steel = cover + stirrup_dia + 0.5 * db
-        y_steel = max(y_steel, 0.6)
-        y_steel = min(y_steel, h - 0.6)
-        # show d from top compression face
-        y_d_start = h
-        y_d_end = y_steel
+        y_d_start, y_d_end = h, y_steel  # d measured from top to steel
     else:
         y_steel = h - (cover + stirrup_dia + 0.5 * db)
-        y_steel = max(y_steel, 0.6)
-        y_steel = min(y_steel, h - 0.6)
-        # compression at bottom -> d from bottom
-        y_d_start = 0.0
-        y_d_end = y_steel
+        y_d_start, y_d_end = 0.0, y_steel  # d measured from bottom to steel (teaching flip)
 
-    # distribute bars across web width
-    bar_left = web_left + 0.8
-    bar_right = web_right - 0.8
-    if n_bars == 1:
-        xs = [(bar_left + bar_right)/2.0]
+    # Place bars across web width
+    margin = 0.9
+    xL = web_left + margin
+    xR = web_right - margin
+    if n_bars <= 1:
+        xs = [(xL + xR) / 2.0]
     else:
-        xs = [bar_left + i*(bar_right - bar_left)/(n_bars-1) for i in range(n_bars)]
+        xs = [xL + i * (xR - xL) / (n_bars - 1) for i in range(n_bars)]
 
     for x in xs:
-        circ = patches.Circle((x, y_steel), radius=max(0.18, 0.18*db), fill=True)
+        circ = patches.Circle((x, y_steel), radius=max(0.18, 0.18 * db), fill=True)
         ax.add_patch(circ)
 
-    ax.annotate(f"{n_bars} {bar} (tension)", xy=(sec_left, y_steel), xytext=(sec_left, y_steel - 1.2))
+    # Rebar label
+    ax.text(sec_left, y_steel - (1.4 if tension_face == "bottom" else -1.0),
+            f"{n_bars} {bar} (tension)", ha="left", va="center")
 
-    # Effective depth d indicator
-    ax.annotate("", xy=(sec_right + 0.1, y_d_start), xytext=(sec_right + 0.1, y_d_end),
-                arrowprops=dict(arrowstyle="<->"))
-    ax.annotate(f"d≈{d:.2f} in", xy=(sec_right + 0.3, (y_d_start + y_d_end)/2), va="center")
+    # d dimension arrow
+    ax.annotate("", xy=(sec_right + 0.2, y_d_start), xytext=(sec_right + 0.2, y_d_end),
+                arrowprops=dict(arrowstyle="<->", linewidth=1.5))
+    ax.text(sec_right + 0.6, 0.5 * (y_d_start + y_d_end), f"d≈{d:.2f} in", va="center")
+
+    # Section dimensions: b and h
+    # b along bottom
+    _dim_arrow(ax, sec_left, -0.8, sec_right, -0.8, f"b={b_total:.1f} in", text_offset=(0, -0.2))
+    # h along left
+    _dim_arrow(ax, -0.8, 0.0, -0.8, h, f"h={h:.1f} in", text_offset=(-0.2, 0))
+
+    # T-beam extra dimensions
+    if shape == "T-beam":
+        # bf along flange top
+        _dim_arrow(ax, 0.0, h + 0.8, b_total, h + 0.8, f"bf={b_total:.1f} in", text_offset=(0, 0.2))
+        # bw along web mid
+        _dim_arrow(ax, web_left, (h - hf) / 2.0, web_right, (h - hf) / 2.0, f"bw={b_web:.1f} in")
+        # hf along right side near flange
+        _dim_arrow(ax, sec_right + 1.6, h - hf, sec_right + 1.6, h, f"hf={hf:.1f} in")
 
     # Formatting
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlim(sec_left - 1.0, sec_right + 6.0)
-    ax.set_ylim(-1.0, h + 1.0)
+    ax.set_xlim(sec_left - 2.5, sec_right + 8.5)
+    ax.set_ylim(-2.2, h + 2.2)
     ax.axis("off")
-    ax.set_title("Section Sketch (Teaching)")
-
-    # ----- STRAIN DIAGRAM -----
-    # linear strain: 0.003 at compression face, 0 at NA, tension at steel
-    # We'll plot epsilon vs y (y measured from section bottom)
-    ax2.axvline(0, linewidth=1)
-
-    # Define y coordinate and epsilon profile
-    # Choose compression face strain = +0.003, tension negative (plotted left)
-    if c <= 0 or c >= h:
-        # fallback: just show a generic triangle
-        y_vals = [0, h]
-        eps_vals = [-0.005, 0.003]
-    else:
-        if compression_face == "top":
-            # y= h at top, y=0 at bottom; NA at y_na
-            y_na = h - c
-            # compression at top: +0.003; at NA: 0; at steel: eps_t (negative)
-            eps_t = float(flex.get("eps_t", 0.0))
-            y_vals = [h, y_na, y_steel]
-            eps_vals = [0.003, 0.0, -abs(eps_t)]
-        else:
-            # compression at bottom
-            y_na = c
-            eps_t = float(flex.get("eps_t", 0.0))
-            y_vals = [0.0, y_na, y_steel]
-            eps_vals = [0.003, 0.0, -abs(eps_t)]
-
-    ax2.plot(eps_vals, y_vals, linewidth=2)
-    ax2.scatter(eps_vals, y_vals, s=25)
-
-    ax2.set_ylim(-1.0, h + 1.0)
-    ax2.set_xlim(-0.01, 0.0045)
-    ax2.set_xlabel("Strain, ε")
-    ax2.set_ylabel("y (in)")
-    ax2.set_title("Strain Diagram (Teaching)")
-    ax2.grid(True, alpha=0.2)
-
-    # Labels
-    ax2.text(0.003, (h if compression_face == "top" else 0.0), " 0.003 (εcu)", va="center")
-    ax2.text(-abs(float(flex.get("eps_t", 0.0))), y_steel, " εt", va="center")
-
+    ax.set_title("Design Sketch (Teaching)", fontsize=14)
     fig.tight_layout()
     return fig
 
@@ -1156,39 +1118,51 @@ def agent_run(prompt: str):
 # ============================================================
 
 st.set_page_config(page_title="ACI 318-19 RC Design Agent", layout="wide")
-st.title("ACI 318-19 RC Design Copilot Demo (Agent + Skills)")
+st.title("ACI 318-19 RC Design Copilot — Demo (Agent + Skills)")
 st.caption("Teaching demo only — simplified/incomplete checks. Not for real design/stamping.")
 
-# Example prompts (kept in main so sidebar can reference)
+# CSS for equal-height panels
+st.markdown(
+    """
+    <style>
+      .equalbox {
+        border: 1px solid rgba(49,51,63,0.2);
+        border-radius: 10px;
+        padding: 12px 14px;
+        min-height: 520px;   /* makes left/right panels same height */
+        overflow: auto;
+        background: rgba(250,250,252,0.25);
+      }
+      .equalbox h4 {
+        margin-top: 0px;
+      }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 EXAMPLES = {
     "Beam Flexure (Rect, positive)":
         "Beam flexure: Design a 12x24 rectangular beam, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
         "Mu=180 kip-ft, positive moment, use #8 max bars.",
-
     "Beam Flexure (T-beam, positive, manual bf)":
         "Beam flexure: Design a T-beam bw=12 in h=28 in bf=48 in hf=4 in, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
         "Mu=220 kip-ft, positive moment, use #8 max bars.",
-
     "Beam Flexure (T-beam, Auto beff)":
         "Beam flexure: Design a T-beam bw=12 in h=28 in hf=4 in, auto beff, Ln=24 ft, sw=72 in, "
         "cover 1.5 in, fc=4 ksi, fy=60 ksi, Mu=220 kip-ft, positive moment, use #8 max bars.",
-
     "Beam Flexure (T-beam, negative)":
         "Beam flexure: Design a T-beam bw=12 in h=28 in bf=48 in hf=4 in, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
         "Mu=180 kip-ft, negative moment, use #8 max bars.",
-
     "Beam Shear (standalone)":
         "Beam shear: Design shear for a 12x24 beam, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
         "Vu=70 kips, main bars #8, stirrups #3.",
-
     "Beam Flexure + Shear":
         "Design a 12x24 beam, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
         "Mu=180 kip-ft, Vu=70 kips, positive moment, use #8 max bars, stirrups #3.",
-
     "Column (tied)":
         "Design a 16x16 tied column, cover 1.5 in, fc=5 ksi, fy=60 ksi, "
         "Pu=350 kips, Mu=120 kip-ft, use #8 bars, ties #3.",
-
     "One-way slab":
         "One-way slab design: t=8 in, cover 0.75 in, fc=4 ksi, fy=60 ksi, "
         "L=15 ft, wu=120 psf, simply supported.",
@@ -1199,14 +1173,12 @@ if "prompt_text" not in st.session_state:
     st.session_state.prompt_text = EXAMPLES["Beam Flexure (Rect, positive)"]
 if "show_thinking" not in st.session_state:
     st.session_state.show_thinking = True
-if "show_diagrams" not in st.session_state:
-    st.session_state.show_diagrams = True
+if "show_sketch" not in st.session_state:
+    st.session_state.show_sketch = True
 
-# ----------------------------
-# SIDEBAR
-# ----------------------------
+# Sidebar
 st.sidebar.title("RC Design Copilot")
-st.sidebar.caption("Inputs / Examples (ENCE 2530 & ENCE 3680)")
+st.sidebar.caption("User Inputs")
 
 choice = st.sidebar.selectbox("Example prompt", list(EXAMPLES.keys()))
 rowA = st.sidebar.columns(2)
@@ -1222,7 +1194,7 @@ st.sidebar.markdown("---")
 prompt = st.sidebar.text_area("Prompt", value=st.session_state.prompt_text, height=230)
 
 st.session_state.show_thinking = st.sidebar.checkbox("Show agent thinking panel", value=st.session_state.show_thinking)
-st.session_state.show_diagrams = st.sidebar.checkbox("Show diagrams (section + strain)", value=st.session_state.show_diagrams)
+st.session_state.show_sketch = st.sidebar.checkbox("Show Design Sketch", value=st.session_state.show_sketch)
 
 st.sidebar.markdown("---")
 rowB = st.sidebar.columns(2)
@@ -1242,17 +1214,13 @@ if clear:
     st.session_state.last_warnings = []
     st.session_state.last_steps = []
 
-# ----------------------------
-# MAIN PANEL
-# ----------------------------
+# Main
 st.markdown("### Output")
 
 if run:
-    # Progress / status + spinner
     with st.spinner("Agent is thinking..."):
         with st.status("Agent progress", expanded=True) as status:
             status.write("Parsing prompt...")
-            # Run agent
             result, warnings, steps = agent_run(prompt)
             status.write("Finalizing results...")
             status.update(label="Agent finished", state="complete", expanded=False)
@@ -1261,7 +1229,6 @@ if run:
     st.session_state.last_warnings = warnings
     st.session_state.last_steps = steps
 
-# Render latest output
 result = st.session_state.last_result
 warnings = st.session_state.last_warnings
 steps = st.session_state.last_steps
@@ -1276,20 +1243,24 @@ else:
             for s in steps:
                 st.write(f"- {s}")
 
-    # Beam output
+    # Beam
     if result["member_type"] == "beam":
-        colL, colR = st.columns([1.15, 0.85], gap="large")
+        colL, colR = st.columns([1, 1], gap="large")
 
         with colL:
+            st.markdown('<div class="equalbox">', unsafe_allow_html=True)
+            st.markdown("#### Beam Narrative")
             if "flexure_narrative" in result:
-                st.markdown("#### Beam Flexure Narrative")
+                st.markdown("**Flexure**")
                 st.code(result["flexure_narrative"])
             if "shear_narrative" in result:
-                st.markdown("#### Beam Shear Narrative")
+                st.markdown("**Shear**")
                 st.code(result["shear_narrative"])
+            st.markdown("</div>", unsafe_allow_html=True)
 
         with colR:
-            st.markdown("#### Key outputs")
+            st.markdown('<div class="equalbox">', unsafe_allow_html=True)
+            st.markdown("#### Key Outputs")
             out = {}
             if "flexure" in result:
                 f = result["flexure"]
@@ -1299,6 +1270,8 @@ else:
                     "Bars": f"{f['n']} {f['bar']}",
                     "As (in^2)": round(f["As_prov"], 2),
                     "d (in)": round(f["d_in"], 2),
+                    "a (in)": round(f["a_in"], 2),
+                    "c (in)": round(f["c_in"], 2),
                     "phi": round(f["phi"], 3),
                     "phiMn (kip-ft)": round(f["phiMn_kipft"], 1),
                 })
@@ -1320,14 +1293,15 @@ else:
                     "Stirrups": ("N/A" if sh["s_use_in"] is None else f"{sh['legs']}-leg {sh['stirrup_size']} @ {sh['s_use_in']:.1f} in"),
                 })
             st.write(out)
+            st.markdown("</div>", unsafe_allow_html=True)
 
-        # Option B diagram (section + strain)
-        if st.session_state.show_diagrams and "flexure" in result:
-            st.markdown("### Diagrams")
-            fig = _draw_section_and_strain(result["flexure"])
+        # Design Sketch (bigger, section only)
+        if st.session_state.show_sketch and "flexure" in result:
+            st.markdown("### Design Sketch")
+            fig = draw_design_sketch_section(result["flexure"])
             st.pyplot(fig, use_container_width=True)
 
-    # Column output
+    # Column
     elif result["member_type"] == "column":
         st.markdown("#### Narrative")
         st.code(result["narrative"])
@@ -1343,7 +1317,7 @@ else:
             "OK?": c["ok"]
         })
 
-    # Slab output
+    # Slab
     else:
         st.markdown("#### Narrative")
         st.code(result["narrative"])
