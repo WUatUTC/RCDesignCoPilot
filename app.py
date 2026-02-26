@@ -42,10 +42,20 @@ DEFAULT_TIE_SIZE = "#3"
 # ============================================================
 
 def _find_number(text: str, patterns, default=None):
+    """
+    Returns the first numeric capture group found.
+    Works whether the regex has 1 group (number) or multiple groups
+    (e.g., 'fc=4 ksi' where group(1) is 'fc' and group(2) is the number).
+    """
     for pat in patterns:
         m = re.search(pat, text, flags=re.IGNORECASE)
         if m:
-            return float(m.group(1))
+            # Try groups from last to first; return the first that parses as float
+            for gi in range(m.lastindex, 0, -1):
+                try:
+                    return float(m.group(gi))
+                except (TypeError, ValueError):
+                    continue
     return default
 
 def _find_bar(text: str, patterns, default=None):
