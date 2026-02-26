@@ -787,7 +787,7 @@ def agent_run(prompt: str):
 # ============================================================
 
 st.set_page_config(page_title="ACI 318-19 RC Agent Demo", layout="wide")
-st.title("ACI 318-19 RC Design Copilot — Level-2 Demo (Agent + Skills)")
+st.title("ACI 318-19 RC Design Copilot (Agent + Skills)")
 st.info("Teaching demo only — simplified and incomplete checks. Not for real design/stamping.")
 
 left, right = st.columns([1, 1])
