@@ -34,6 +34,8 @@ import math
 import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import json
+import html
 
 
 # -----------------------------
@@ -1125,16 +1127,22 @@ st.caption("Teaching demo only — simplified/incomplete checks. Not for real de
 st.markdown(
     """
     <style>
-      .equalbox {
+      .panel {
         border: 1px solid rgba(49,51,63,0.2);
-        border-radius: 10px;
-        padding: 12px 14px;
-        min-height: 520px;   /* makes left/right panels same height */
-        overflow: auto;
+        border-radius: 12px;
+        padding: 14px 14px;
+        min-height: 520px;
         background: rgba(250,250,252,0.25);
+        overflow: auto;
       }
-      .equalbox h4 {
-        margin-top: 0px;
+      .panel h4 { margin: 0 0 8px 0; }
+      .panel pre {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        margin: 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 0.9rem;
+        line-height: 1.25rem;
       }
     </style>
     """,
@@ -1243,63 +1251,79 @@ else:
             for s in steps:
                 st.write(f"- {s}")
 
-    # Beam
-    if result["member_type"] == "beam":
-        colL, colR = st.columns([1, 1], gap="large")
+# Beam
+if result["member_type"] == "beam":
+    colL, colR = st.columns([1, 1], gap="large")
 
-        with colL:
-            st.markdown('<div class="equalbox">', unsafe_allow_html=True)
-            st.markdown("#### Beam Narrative")
-            if "flexure_narrative" in result:
-                st.markdown("**Flexure**")
-                st.code(result["flexure_narrative"])
-            if "shear_narrative" in result:
-                st.markdown("**Shear**")
-                st.code(result["shear_narrative"])
-            st.markdown("</div>", unsafe_allow_html=True)
+    # Build narrative text (single string)
+    narrative_parts = []
+    if "flexure_narrative" in result:
+        narrative_parts.append("=== FLEXURE ===\n" + result["flexure_narrative"])
+    if "shear_narrative" in result:
+        narrative_parts.append("\n=== SHEAR ===\n" + result["shear_narrative"])
+    narrative_text = "\n".join(narrative_parts).strip()
 
-        with colR:
-            st.markdown('<div class="equalbox">', unsafe_allow_html=True)
-            st.markdown("#### Key Outputs")
-            out = {}
-            if "flexure" in result:
-                f = result["flexure"]
-                out.update({
-                    "Flexure shape": f["shape"],
-                    "Moment sign": f["moment_sign"],
-                    "Bars": f"{f['n']} {f['bar']}",
-                    "As (in^2)": round(f["As_prov"], 2),
-                    "d (in)": round(f["d_in"], 2),
-                    "a (in)": round(f["a_in"], 2),
-                    "c (in)": round(f["c_in"], 2),
-                    "phi": round(f["phi"], 3),
-                    "phiMn (kip-ft)": round(f["phiMn_kipft"], 1),
-                })
-                if f["shape"] == "T-beam":
-                    out.update({
-                        "bw (in)": f["bw_in"],
-                        "bf (in)": f["bf_in"],
-                        "hf (in)": f["hf_in"],
-                        "Auto beff?": f.get("auto_beff", False),
-                        "bf_auto (in)": (None if f.get("bf_auto_in") is None else round(f["bf_auto_in"], 1)),
-                        "bf_auto used?": f.get("bf_auto_used", False),
-                    })
-            if "shear" in result:
-                sh = result["shear"]
-                out.update({
-                    "Vu (kips)": result["inputs"]["Vu_kips"],
-                    "Vc (kips)": round(sh["Vc_kips"], 1),
-                    "phiVc (kips)": round(sh["phiVc_kips"], 1),
-                    "Stirrups": ("N/A" if sh["s_use_in"] is None else f"{sh['legs']}-leg {sh['stirrup_size']} @ {sh['s_use_in']:.1f} in"),
-                })
-            st.write(out)
-            st.markdown("</div>", unsafe_allow_html=True)
+    # Build key outputs dict
+    out = {}
+    if "flexure" in result:
+        f = result["flexure"]
+        out.update({
+            "Flexure shape": f["shape"],
+            "Moment sign": f["moment_sign"],
+            "Bars": f"{f['n']} {f['bar']}",
+            "As (in^2)": round(f["As_prov"], 2),
+            "d (in)": round(f["d_in"], 2),
+            "a (in)": round(f["a_in"], 2),
+            "c (in)": round(f["c_in"], 2),
+            "phi": round(f["phi"], 3),
+            "phiMn (kip-ft)": round(f["phiMn_kipft"], 1),
+        })
+        if f["shape"] == "T-beam":
+            out.update({
+                "bw (in)": f["bw_in"],
+                "bf (in)": f["bf_in"],
+                "hf (in)": f["hf_in"],
+                "Auto beff?": f.get("auto_beff", False),
+                "bf_auto (in)": (None if f.get("bf_auto_in") is None else round(f["bf_auto_in"], 1)),
+                "bf_auto used?": f.get("bf_auto_used", False),
+            })
+    if "shear" in result:
+        sh = result["shear"]
+        out.update({
+            "Vu (kips)": result["inputs"]["Vu_kips"],
+            "Vc (kips)": round(sh["Vc_kips"], 1),
+            "phiVc (kips)": round(sh["phiVc_kips"], 1),
+            "Stirrups": ("N/A" if sh["s_use_in"] is None else f"{sh['legs']}-leg {sh['stirrup_size']} @ {sh['s_use_in']:.1f} in"),
+        })
 
-        # Design Sketch (bigger, section only)
-        if st.session_state.show_sketch and "flexure" in result:
-            st.markdown("### Design Sketch")
-            fig = draw_design_sketch_section(result["flexure"])
-            st.pyplot(fig, use_container_width=True)
+    # Render equal-height panels using HTML (works reliably)
+    with colL:
+        st.markdown(
+            f"""
+            <div class="panel">
+              <h4>Beam Narrative</h4>
+              <pre>{html.escape(narrative_text if narrative_text else "No narrative available.")}</pre>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with colR:
+        st.markdown(
+            f"""
+            <div class="panel">
+              <h4>Key Outputs</h4>
+              <pre>{html.escape(json.dumps(out, indent=2))}</pre>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # Design Sketch (smaller)
+    if st.session_state.show_sketch and "flexure" in result:
+        st.markdown("### Design Sketch")
+        fig = draw_design_sketch_section(result["flexure"])
+        st.pyplot(fig, use_container_width=False)
 
     # Column
     elif result["member_type"] == "column":
