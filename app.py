@@ -840,71 +840,75 @@ def slab_design_one_way(inp):
 
 
 # ============================================================
-# Narratives
+# Narratives (Reformatted to HTML structured lists)
 # ============================================================
 
 def narrative_beam_flexure(inp, f):
     lines = []
-    lines.append("=== BEAM FLEXURE (Teaching) ===")
-    lines.append(clear_cover_definition_note())
-    lines.append(f"Shape: {f['shape']}, moment: {f['moment_sign']}")
+    lines.append("<div style='margin-bottom: 8px;'><strong style='color: #1f77b4;'>=== BEAM FLEXURE ===</strong></div>")
+    lines.append(f"<div style='font-size: 0.85em; color: #666; margin-bottom: 12px;'><em>{clear_cover_definition_note()}</em></div>")
+    lines.append("<ul style='margin-top:0; padding-left: 20px; line-height: 1.6;'>")
+    lines.append(f"<li><strong>Shape:</strong> {f['shape']} | <strong>Moment:</strong> {f['moment_sign']}</li>")
     if f["shape"] == "T-beam":
-        lines.append(f"T-beam: bw={f['bw_in']} in, bf={f['bf_in']} in, hf={f['hf_in']} in")
+        lines.append(f"<li><strong>T-beam:</strong> bw={f['bw_in']}\", bf={f['bf_in']}\", hf={f['hf_in']}\"</li>")
         if f.get("auto_beff", False):
             if f.get("bf_auto_used", False):
-                lines.append(f"Auto beff ON: bf computed ≈ {f.get('bf_auto_in'):.1f} in from Ln and sw.")
+                lines.append(f"<li><strong>Auto beff ON:</strong> bf computed &approx; {f.get('bf_auto_in'):.1f}\" from Ln and sw.</li>")
             elif f.get("bf_auto_in") is not None:
-                lines.append(f"Auto beff ON: bf_auto ≈ {f.get('bf_auto_in'):.1f} in (user bf used).")
+                lines.append(f"<li><strong>Auto beff ON:</strong> bf_auto &approx; {f.get('bf_auto_in'):.1f}\" (user bf used).</li>")
             else:
-                lines.append("Auto beff ON: could not compute bf (need Ln and sw).")
-    lines.append(f"f'c={inp['fc_psi']/1000:.2f} ksi, fy={inp['fy_psi']/1000:.0f} ksi")
-    lines.append(f"Mu={inp['Mu_kipft']:.2f} kip-ft")
-    lines.append(f"Selected: {f['n']} {f['bar']} bars -> As={f['As_prov']:.2f} in^2 (As,min={f['Asmin']:.2f} in^2)")
-    lines.append(f"d≈{f['d_in']:.2f} in, a={f['a_in']:.2f} in, c≈{f['c_in']:.2f} in")
-    lines.append(f"εt≈{f['eps_t']:.5f} -> ϕ≈{f['phi']:.3f}")
-    lines.append(f"Mn≈{f['Mn_kipft']:.1f} kip-ft; ϕMn≈{f['phiMn_kipft']:.1f} kip-ft")
-    lines.append("DISCLAIMER: Teaching demo only.")
-    return "\n".join(lines)
+                lines.append("<li><strong>Auto beff ON:</strong> could not compute bf (need Ln and sw).</li>")
+    lines.append(f"<li><strong>Materials:</strong> f'c={inp['fc_psi']/1000:.2f} ksi, fy={inp['fy_psi']/1000:.0f} ksi</li>")
+    lines.append(f"<li><strong>Demand:</strong> Mu={inp['Mu_kipft']:.2f} kip-ft</li>")
+    lines.append(f"<li><strong>Selected:</strong> <span style='background-color: #e6f2ff; padding: 2px 6px; border-radius: 4px; color: #0056b3;'><strong>{f['n']} {f['bar']} bars</strong></span> &rarr; As={f['As_prov']:.2f} in&sup2; (As,min={f['Asmin']:.2f} in&sup2;)</li>")
+    lines.append(f"<li><strong>Section Props:</strong> d&approx;{f['d_in']:.2f}\", a={f['a_in']:.2f}\", c&approx;{f['c_in']:.2f}\"</li>")
+    lines.append(f"<li><strong>Strain:</strong> &epsilon;<sub>t</sub>&approx;{f['eps_t']:.5f} &rarr; &phi;&approx;{f['phi']:.3f}</li>")
+    lines.append(f"<li><strong>Capacity:</strong> Mn&approx;{f['Mn_kipft']:.1f} kip-ft &rarr; <strong>&phi;Mn&approx;{f['phiMn_kipft']:.1f} kip-ft</strong></li>")
+    lines.append("</ul>")
+    return "".join(lines)
 
 def narrative_beam_shear(inp, sh):
     lines = []
-    lines.append("=== BEAM SHEAR (ACI beam shear; teaching) ===")
-    lines.append(clear_cover_definition_note())
-    lines.append(f"f'c={inp['fc_psi']/1000:.2f} ksi, fy={inp['fy_psi']/1000:.0f} ksi")
-    lines.append(f"Vu={inp['Vu_kips']:.2f} kips, bw={sh['bw_in']:.1f} in, d≈{sh['d_in']:.2f} in")
-    lines.append(f"Vc≈{sh['Vc_kips']:.1f} kips; ϕVc≈{sh['phiVc_kips']:.1f} kips (ϕ={sh['phi_v']:.2f})")
+    lines.append("<div style='margin-bottom: 8px;'><strong style='color: #1f77b4;'>=== BEAM SHEAR ===</strong></div>")
+    lines.append(f"<div style='font-size: 0.85em; color: #666; margin-bottom: 12px;'><em>{clear_cover_definition_note()}</em></div>")
+    lines.append("<ul style='margin-top:0; padding-left: 20px; line-height: 1.6;'>")
+    lines.append(f"<li><strong>Materials:</strong> f'c={inp['fc_psi']/1000:.2f} ksi, fy={inp['fy_psi']/1000:.0f} ksi</li>")
+    lines.append(f"<li><strong>Section:</strong> Vu={inp['Vu_kips']:.2f} kips, bw={sh['bw_in']:.1f}\", d&approx;{sh['d_in']:.2f}\"</li>")
+    lines.append(f"<li><strong>Concrete:</strong> Vc&approx;{sh['Vc_kips']:.1f} kips &rarr; <strong>&phi;Vc&approx;{sh['phiVc_kips']:.1f} kips</strong> (&phi;={sh['phi_v']:.2f})</li>")
     if sh["s_use_in"] is None:
-        lines.append("Stirrups not required by strength in baseline; minimum reinforcement may still govern depending on region.")
+        lines.append("<li><strong>Result:</strong> Stirrups not required by strength in baseline.</li>")
     else:
-        lines.append(f"Provide {sh['legs']}-leg {sh['stirrup_size']} @ s={sh['s_use_in']:.1f} in (cap={sh['s_cap_in']:.1f} in)")
-    lines.append("DISCLAIMER: Teaching demo only.")
-    return "\n".join(lines)
+        lines.append(f"<li><strong>Result:</strong> Provide <span style='background-color: #e6f2ff; padding: 2px 6px; border-radius: 4px; color: #0056b3;'><strong>{sh['legs']}-leg {sh['stirrup_size']} @ s={sh['s_use_in']:.1f}\"</strong></span> (cap={sh['s_cap_in']:.1f}\")</li>")
+    lines.append("</ul>")
+    return "".join(lines)
 
 def narrative_column(inp, col):
     lines = []
-    lines.append("=== SHORT TIED COLUMN (Teaching) ===")
-    lines.append(clear_cover_definition_note())
-    lines.append(f"Section: {inp['b_in']:.1f} x {inp['h_in']:.1f} in")
-    lines.append(f"f'c={inp['fc_psi']/1000:.2f} ksi, fy={inp['fy_psi']/1000:.0f} ksi")
-    lines.append(f"Pu={inp['Pu_kips']:.1f} kips, Mu={inp['Mu_col_kipft']:.1f} kip-ft")
-    lines.append(f"Selected: {col['n_bars']} {col['bar_size']} bars; Ast={col['Ast_in2']:.2f} in^2; ρ={col['rho']:.3f}")
-    lines.append(f"ϕ={col['phi']:.2f}; P_req=Pu/ϕ={col['P_req']:.1f} kips")
-    lines.append(f"Mn(P_req)≈{col['Mn_at_Preq']:.1f} kip-ft; ϕMn≈{col['phiMn_at_Preq']:.1f} kip-ft -> OK={col['ok']}")
-    lines.append(f"Ties: {col['tie_size']}; s_max≈{col['s_tie_max_in']:.1f} in (teaching limit)")
-    lines.append("DISCLAIMER: Teaching demo only.")
-    return "\n".join(lines)
+    lines.append("<div style='margin-bottom: 8px;'><strong style='color: #1f77b4;'>=== SHORT TIED COLUMN ===</strong></div>")
+    lines.append(f"<div style='font-size: 0.85em; color: #666; margin-bottom: 12px;'><em>{clear_cover_definition_note()}</em></div>")
+    lines.append("<ul style='margin-top:0; padding-left: 20px; line-height: 1.6;'>")
+    lines.append(f"<li><strong>Section:</strong> {inp['b_in']:.1f}\" x {inp['h_in']:.1f}\"</li>")
+    lines.append(f"<li><strong>Materials:</strong> f'c={inp['fc_psi']/1000:.2f} ksi, fy={inp['fy_psi']/1000:.0f} ksi</li>")
+    lines.append(f"<li><strong>Demands:</strong> Pu={inp['Pu_kips']:.1f} kips, Mu={inp['Mu_col_kipft']:.1f} kip-ft</li>")
+    lines.append(f"<li><strong>Selected:</strong> <span style='background-color: #e6f2ff; padding: 2px 6px; border-radius: 4px; color: #0056b3;'><strong>{col['n_bars']} {col['bar_size']} bars</strong></span> &rarr; Ast={col['Ast_in2']:.2f} in&sup2; (&rho;={col['rho']:.3f})</li>")
+    lines.append(f"<li><strong>Capacity:</strong> &phi;={col['phi']:.2f} &rarr; P_req={col['P_req']:.1f} kips</li>")
+    lines.append(f"<li><strong>Check:</strong> Mn(P_req)&approx;{col['Mn_at_Preq']:.1f} kip-ft &rarr; <strong>&phi;Mn&approx;{col['phiMn_at_Preq']:.1f} kip-ft</strong> (OK={col['ok']})</li>")
+    lines.append(f"<li><strong>Ties:</strong> {col['tie_size']} &rarr; s_max&approx;{col['s_tie_max_in']:.1f}\"</li>")
+    lines.append("</ul>")
+    return "".join(lines)
 
 def narrative_slab(inp, sres):
     lines = []
-    lines.append("=== ONE-WAY SLAB (Teaching) ===")
-    lines.append(f"Support model: {sres['support_note']}")
-    lines.append(f"t={inp['slab_t_in']:.1f} in, cover={inp['cover_in']:.2f} in (typical slab assumption)")
-    lines.append(f"f'c={inp['fc_psi']/1000:.2f} ksi, fy={inp['fy_psi']/1000:.0f} ksi")
-    lines.append(f"L={inp['slab_L_ft']:.2f} ft, wu={inp['slab_wu_psf']:.1f} psf -> Mu≈{sres['Mu_kipft']:.2f} kip-ft (per 1-ft strip)")
-    lines.append(f"Provide {sres['bar']} @ {sres['s_in']} in -> As≈{sres['As_in2_per_ft']:.3f} in^2/ft")
-    lines.append(f"d≈{sres['d_in']:.2f} in, ϕ={sres['phi']:.2f}, ϕMn≈{sres['phiMn_kipft']:.2f} kip-ft")
-    lines.append("DISCLAIMER: Teaching demo only.")
-    return "\n".join(lines)
+    lines.append("<div style='margin-bottom: 8px;'><strong style='color: #1f77b4;'>=== ONE-WAY SLAB ===</strong></div>")
+    lines.append("<ul style='margin-top:0; padding-left: 20px; line-height: 1.6;'>")
+    lines.append(f"<li><strong>Support model:</strong> {sres['support_note']}</li>")
+    lines.append(f"<li><strong>Parameters:</strong> t={inp['slab_t_in']:.1f}\", cover={inp['cover_in']:.2f}\"</li>")
+    lines.append(f"<li><strong>Materials:</strong> f'c={inp['fc_psi']/1000:.2f} ksi, fy={inp['fy_psi']/1000:.0f} ksi</li>")
+    lines.append(f"<li><strong>Demand:</strong> L={inp['slab_L_ft']:.2f} ft, wu={inp['slab_wu_psf']:.1f} psf &rarr; Mu&approx;{sres['Mu_kipft']:.2f} kip-ft/ft</li>")
+    lines.append(f"<li><strong>Result:</strong> Provide <span style='background-color: #e6f2ff; padding: 2px 6px; border-radius: 4px; color: #0056b3;'><strong>{sres['bar']} @ {sres['s_in']}\"</strong></span> &rarr; As&approx;{sres['As_in2_per_ft']:.3f} in&sup2;/ft</li>")
+    lines.append(f"<li><strong>Capacity:</strong> d&approx;{sres['d_in']:.2f}\", &phi;={sres['phi']:.2f} &rarr; <strong>&phi;Mn&approx;{sres['phiMn_kipft']:.2f} kip-ft</strong></li>")
+    lines.append("</ul>")
+    return "".join(lines)
 
 
 # ============================================================
@@ -927,8 +931,9 @@ def draw_design_sketch_section(flex: dict):
     Larger, teaching-style cross-section sketch with:
       - Rectangular or T-beam outline
       - Dimensions: b, h; (T-beam: bf, bw, hf)
-      - Rebar shown on tension face (+/- moment) with label "n #bar"
-      - a, c, d (teaching labels)
+      - Tension steel on correct face (+/- moment)
+      - Rebar label (n and bar size)
+      - Compression block depth a, neutral axis c, effective depth d (teaching visuals)
     """
     shape = flex.get("shape", "Rectangular")
     h = float(flex.get("h_in", 24.0))
@@ -960,8 +965,8 @@ def draw_design_sketch_section(flex: dict):
         bw = b_web
         bf = b_total
 
-    # Half-sized figure (single sketch)
-    fig, ax = plt.subplots(figsize=(5.75, 3.25))
+    # 1/4 reduced figure (single sketch)
+    fig, ax = plt.subplots(figsize=(4.3, 2.4))
 
     # Coordinate convention: y from bottom (0) to top (h)
     # Draw section
@@ -1135,26 +1140,38 @@ st.set_page_config(page_title="ACI 318-19 RC Design Agent", layout="wide")
 st.title("ACI 318-19 RC Design Copilot — Demo (Agent + Skills)")
 st.caption("Teaching demo only — simplified/incomplete checks. Not for real design/stamping.")
 
-# CSS for equal-height panels
+# CSS for equal-height panels and improved table formats
 st.markdown(
     """
     <style>
       .panel {
         border: 1px solid rgba(49,51,63,0.2);
         border-radius: 12px;
-        padding: 14px 14px;
+        padding: 20px;
         min-height: 520px;
-        background: rgba(250,250,252,0.25);
+        background: rgba(250,250,252,0.8);
         overflow: auto;
+        font-size: 1.1rem;
+        line-height: 1.6;
       }
-      .panel h4 { margin: 0 0 8px 0; }
-      .panel pre {
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        margin: 0;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        font-size: 0.9rem;
-        line-height: 1.25rem;
+      .panel h4 { 
+        margin: 0 0 12px 0; 
+        font-size: 1.3rem; 
+        border-bottom: 1px solid #e0e0e0; 
+        padding-bottom: 8px;
+      }
+      .out-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .out-table td {
+        padding: 8px 4px;
+        border-bottom: 1px solid #f0f2f6;
+      }
+      .val-col {
+        text-align: right;
+        font-weight: bold;
+        color: #0056b3;
       }
     </style>
     """,
@@ -1234,6 +1251,14 @@ if clear:
     st.session_state.last_warnings = []
     st.session_state.last_steps = []
 
+# Output HTML table generator helper function
+def build_html_table(out_dict):
+    html_str = "<table class='out-table'><tbody>"
+    for k, v in out_dict.items():
+        html_str += f"<tr><td>{k}</td><td class='val-col'>{v}</td></tr>"
+    html_str += "</tbody></table>"
+    return html_str
+
 # Main
 st.markdown("### Output")
 
@@ -1270,10 +1295,10 @@ else:
         # Build narrative text (single string)
         narrative_parts = []
         if "flexure_narrative" in result:
-            narrative_parts.append("=== FLEXURE ===\n" + result["flexure_narrative"])
+            narrative_parts.append(result["flexure_narrative"])
         if "shear_narrative" in result:
-            narrative_parts.append("\n=== SHEAR ===\n" + result["shear_narrative"])
-        narrative_text = "\n".join(narrative_parts).strip()
+            narrative_parts.append(result["shear_narrative"])
+        narrative_text = "".join(narrative_parts)
 
         # Build key outputs dict
         out = {}
@@ -1314,7 +1339,7 @@ else:
                 f"""
                 <div class="panel">
                   <h4>Beam Narrative</h4>
-                  <pre>{html.escape(narrative_text if narrative_text else "No narrative available.")}</pre>
+                  {narrative_text if narrative_text else "No narrative available."}
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -1325,7 +1350,7 @@ else:
                 f"""
                 <div class="panel">
                   <h4>Key Outputs</h4>
-                  <pre>{html.escape(json.dumps(out, indent=2))}</pre>
+                  {build_html_table(out)}
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -1339,11 +1364,9 @@ else:
 
     # Column
     elif result["member_type"] == "column":
-        st.markdown("#### Narrative")
-        st.code(result["narrative"])
+        colL, colR = st.columns([1, 1], gap="large")
         c = result["column"]
-        st.markdown("#### Key outputs")
-        st.write({
+        out = {
             "Bars": f"{c['n_bars']} {c['bar_size']}",
             "rho": round(c["rho"], 3),
             "phi": c["phi"],
@@ -1351,20 +1374,58 @@ else:
             "Tie size": c["tie_size"],
             "Max tie spacing (in)": round(c["s_tie_max_in"], 1),
             "OK?": c["ok"]
-        })
+        }
+        with colL:
+            st.markdown(
+                f"""
+                <div class="panel">
+                  <h4>Column Narrative</h4>
+                  {result["narrative"]}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        with colR:
+            st.markdown(
+                f"""
+                <div class="panel">
+                  <h4>Key Outputs</h4>
+                  {build_html_table(out)}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
     # Slab
     elif result["member_type"] == "slab":
-        st.markdown("#### Narrative")
-        st.code(result["narrative"])
+        colL, colR = st.columns([1, 1], gap="large")
         sres = result["slab"]
-        st.markdown("#### Key outputs")
-        st.write({
+        out = {
             "Bars": f"{sres['bar']} @ {sres['s_in']} in",
             "As (in^2/ft)": round(sres["As_in2_per_ft"], 3),
             "Mu (kip-ft per ft strip)": round(sres["Mu_kipft"], 2),
             "phiMn (kip-ft)": round(sres["phiMn_kipft"], 2),
-        })
+        }
+        with colL:
+            st.markdown(
+                f"""
+                <div class="panel">
+                  <h4>Slab Narrative</h4>
+                  {result["narrative"]}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        with colR:
+            st.markdown(
+                f"""
+                <div class="panel">
+                  <h4>Key Outputs</h4>
+                  {build_html_table(out)}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
     # Warnings
     st.markdown("### Warnings / Assumptions")
