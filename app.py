@@ -1,18 +1,26 @@
 # ============================================================
 # RC DESIGN COPILOT — (ACI 318-19 teaching version)
-# Natural language prompt -> Agent routes skills:
+# Streamlit + Agent + Skills:
 #   - Beam flexure (Rect or T-beam; positive or negative moment)
 #   - Beam shear (one-way; can run standalone)
 #   - Short tied column (P-M interaction; perimeter rebar layout)
 #   - One-way slab design (12-in strip)
 #
-# 
-#   - Optional "Auto beff" mode for T-beams:
-#       be (each side) = min(Ln/8, 8hf, sw/2), bf = bw + 2be
-#     Provide: "auto beff, Ln=..., sw=..." in the prompt.
+# UI ADDITIONAL FEATURES:
+#   1) Sidebar for inputs + examples
+#   2) Advanced diagram (Option B):
+#       - Beam section sketch (Rect/T)
+#       - Compression block depth a, neutral axis c, effective depth d
+#       - Rebar layer shown on tension face
+#       - Optional strain diagram
+#
+# NEW: Optional "Auto beff" for T-beams:
+#   be (each side) = min(Ln/8, 8hf, sw/2)
+#   bf = bw + 2be
+# Use: "auto beff, Ln=..., sw=..." in prompt.
 #
 # Run:
-#   pip install streamlit
+#   pip install -r requirements.txt
 #   streamlit run app.py
 #
 # Teaching demo only. Not for real design/stamping.
@@ -21,6 +29,8 @@
 import re
 import math
 import streamlit as st
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 
 # -----------------------------
@@ -56,7 +66,7 @@ RHO_MAX_COL = 0.08
 
 def _find_number(text: str, patterns, default=None):
     """
-    Robust: returns the first capture group that can be parsed as float.
+    Robust: returns first capture group that can be parsed as float.
     Works even if earlier groups are non-numeric like 'fc' or 'fy'.
     """
     for pat in patterns:
@@ -82,28 +92,6 @@ def _find_bar(text: str, patterns, default=None):
 # ============================================================
 
 def parse_prompt(prompt: str):
-    """
-    Member types: beam / column / slab
-    Beam modes: flexure-only, shear-only, or combined (if both Mu and Vu exist)
-
-    Auto beff usage:
-      "T-beam ... hf=4 in, auto beff, Ln=24 ft, sw=72 in, ..."
-
-    Beam examples:
-      "Beam flexure: Design a T beam bw=12 in h=28 in bf=48 in hf=4 in,
-       cover 1.5 in, fc=4 ksi, fy=60 ksi, Mu=220 kip-ft, positive moment, use #8 max bars."
-
-      "Beam shear: Design shear for a 12x24 beam, cover 1.5 in, fc=4 ksi, fy=60 ksi,
-       Vu=70 kips, main bars #8, stirrups #3."
-
-    Column example:
-      "Design a 16x16 tied column, cover 1.5 in, fc=5 ksi, fy=60 ksi,
-       Pu=350 kips, Mu=120 kip-ft, use #8 bars, ties #3."
-
-    Slab example:
-      "One-way slab design: t=8 in, cover 0.75 in, fc=4 ksi, fy=60 ksi,
-       L=15 ft, wu=120 psf, simply supported."
-    """
     t = prompt.strip()
     warnings = []
 
@@ -194,12 +182,18 @@ def parse_prompt(prompt: str):
     Mu_col = Mu if member_type == "column" else _find_number(t, [r"\bmu_col\s*=?\s*([0-9]*\.?[0-9]+)\s*(?:kip[-\s]*ft|kft)\b"])
 
     # Slab inputs
-    slab_t = _find_number(t, [r"\bt\s*=\s*([0-9]*\.?[0-9]+)\s*(?:in|inch|inches)\b",
-                             r"\bthickness\s*=?\s*([0-9]*\.?[0-9]+)\s*(?:in|inch|inches)\b"])
-    L_ft = _find_number(t, [r"\bL\s*=\s*([0-9]*\.?[0-9]+)\s*(?:ft|feet)\b",
-                           r"\bspan\s*=?\s*([0-9]*\.?[0-9]+)\s*(?:ft|feet)\b"])
-    wu_psf = _find_number(t, [r"\bwu\s*=\s*([0-9]*\.?[0-9]+)\s*psf\b",
-                             r"\bload\s*=?\s*([0-9]*\.?[0-9]+)\s*psf\b"])
+    slab_t = _find_number(t, [
+        r"\bt\s*=\s*([0-9]*\.?[0-9]+)\s*(?:in|inch|inches)\b",
+        r"\bthickness\s*=?\s*([0-9]*\.?[0-9]+)\s*(?:in|inch|inches)\b"
+    ])
+    L_ft = _find_number(t, [
+        r"\bL\s*=\s*([0-9]*\.?[0-9]+)\s*(?:ft|feet)\b",
+        r"\bspan\s*=?\s*([0-9]*\.?[0-9]+)\s*(?:ft|feet)\b"
+    ])
+    wu_psf = _find_number(t, [
+        r"\bwu\s*=\s*([0-9]*\.?[0-9]+)\s*psf\b",
+        r"\bload\s*=?\s*([0-9]*\.?[0-9]+)\s*psf\b"
+    ])
 
     slab_support = "simply"
     if re.search(r"\bcontinuous\b|\binterior\b", t, flags=re.IGNORECASE):
@@ -219,9 +213,9 @@ def parse_prompt(prompt: str):
         elif Vu is not None and Mu is None:
             beam_mode = "shear"
         elif Mu is None and Vu is None:
-            beam_mode = "flexure"  # default; will warn
+            beam_mode = "flexure"
 
-    # Basic missing checks
+    # Missing checks
     if member_type in ("beam", "column"):
         if (b is None or h is None) and not is_t_beam:
             warnings.append("Section size not found. Use '12x24' or 'b=12 in h=24 in'.")
@@ -254,6 +248,7 @@ def parse_prompt(prompt: str):
             warnings.append("Column Pu not found. Example: 'Pu=350 kips'.")
         if Mu_col is None:
             warnings.append("Column Mu not found. Example: 'Mu=120 kip-ft'.")
+
     if member_type == "slab":
         if slab_t is None:
             warnings.append("Slab thickness not found. Example: 't=8 in'.")
@@ -324,16 +319,12 @@ def phi_flexure_from_eps_t(eps_t: float, fy_psi: float) -> float:
 
 def clear_cover_definition_note() -> str:
     return (
-        "Cover in this app = *clear cover to the outside surface of stirrups/ties* "
+        "Cover in this app = clear cover to the OUTSIDE surface of stirrups/ties "
         "(measured from concrete surface to outside of transverse reinforcement)."
     )
 
-def effective_depth(h_in: float, cover_in: float, main_bar_dia_in: float, stirrup_dia_in: float = 0.375,
-                    tension_face: str = "bottom") -> float:
-    """
-    d measured from compression face to centroid of tension steel.
-    (Simplified 1-layer tension steel model.)
-    """
+def effective_depth(h_in: float, cover_in: float, main_bar_dia_in: float, stirrup_dia_in: float = 0.375) -> float:
+    # d ≈ h − cover − stirrup_dia − 0.5*db
     return h_in - cover_in - stirrup_dia_in - 0.5 * main_bar_dia_in
 
 def As_min_beam_us(fc_psi: float, fy_psi: float, b_in: float, d_in: float) -> float:
@@ -345,14 +336,10 @@ def shear_Av_over_s_min_us(fc_psi: float, fy_psi: float, bw_in: float) -> float:
     return max(0.75 * math.sqrt(fc_psi) * bw_in / fy_psi, 50.0 * bw_in / fy_psi)
 
 def shear_Vc_simple_us(fc_psi: float, bw_in: float, d_in: float, lam: float = 1.0) -> float:
-    return (2.0 * lam * math.sqrt(fc_psi) * bw_in * d_in) / 1000.0
+    return (2.0 * lam * math.sqrt(fc_psi) * bw_in * d_in) / 1000.0  # kips
 
 def compute_beff_aci_teaching(bw_in: float, hf_in: float, Ln_in: float, sw_in: float) -> float:
-    """
-    Teaching ACI 318-19 T-beam effective flange width (interior T-beam style):
-      be (each side) = min(Ln/8, 8*hf, sw/2)
-      bf = bw + 2*be
-    """
+    # Teaching: be(each side) = min(Ln/8, 8hf, sw/2), bf = bw + 2be
     be = min(Ln_in / 8.0, 8.0 * hf_in, sw_in / 2.0)
     return bw_in + 2.0 * be
 
@@ -362,18 +349,12 @@ def compute_beff_aci_teaching(bw_in: float, hf_in: float, Ln_in: float, sw_in: f
 # ============================================================
 
 def tbeam_compression_resultant(fc_psi: float, bw: float, bf: float, hf: float, a: float):
-    """
-    Returns:
-      C (lb), ybar (in from top fiber), and a flag whether a<=hf.
-    Compression block: stress = 0.85 fc'
-      if a <= hf: single rectangle bf x a, centroid at a/2
-      if a > hf: flange bf x hf plus web bw x (a-hf)
-    """
+    # returns C (lb), ybar (in from top fiber)
     stress = 0.85 * fc_psi
     if a <= hf:
         C = stress * bf * a
         ybar = a / 2.0
-        return C, ybar, True
+        return C, ybar
 
     C1 = stress * bf * hf
     y1 = hf / 2.0
@@ -381,13 +362,10 @@ def tbeam_compression_resultant(fc_psi: float, bw: float, bf: float, hf: float, 
     y2 = hf + (a - hf) / 2.0
     C = C1 + C2
     ybar = (C1 * y1 + C2 * y2) / C
-    return C, ybar, False
+    return C, ybar
 
 def solve_a_from_As_Tbeam(As: float, fy_psi: float, fc_psi: float, bw: float, bf: float, hf: float):
-    """
-    Force equilibrium: As*fy = 0.85fc' * [bf*min(a,hf) + bw*max(a-hf,0)]
-    Solve piecewise.
-    """
+    # equilibrium: As fy = 0.85 fc' [bf min(a,hf) + bw max(a-hf,0)]
     stress = 0.85 * fc_psi
     a_rect = As * fy_psi / (stress * bf)
     if a_rect <= hf:
@@ -395,20 +373,7 @@ def solve_a_from_As_Tbeam(As: float, fy_psi: float, fc_psi: float, bw: float, bf
     return hf + (As * fy_psi / stress - bf * hf) / bw
 
 def flexure_design_beam_general(inp):
-    """
-    Designs tension steel for:
-      - Rectangular beam (default)
-      - T-beam positive moment (flange compression)
-      - T-beam negative moment: treat as rectangular web compression (teaching simplification)
-    Supports:
-      - positive moment => bottom tension
-      - negative moment => top tension
-    Auto beff:
-      - if 'auto beff' is ON and bf not provided, compute bf from Ln and sw
-      - if bf provided, keep bf but report bf_auto for comparison
-    """
-    steps = []
-    warnings = []
+    steps, warnings = [], []
 
     fc = inp["fc_psi"]
     fy = inp["fy_psi"]
@@ -425,7 +390,7 @@ def flexure_design_beam_general(inp):
     if Mu is None or h is None:
         return None, ["Missing Mu or h."], steps
 
-    # Auto beff logic
+    # Auto beff
     auto_bf_used = False
     bf_auto = None
     if is_t and inp.get("auto_beff", False):
@@ -450,61 +415,43 @@ def flexure_design_beam_general(inp):
     for bar in bar_keys:
         Ab = BAR_DB[bar]["area"]
         db = BAR_DB[bar]["dia"]
+        d = effective_depth(h, cover, db, stirrup_dia_in=BAR_DB["#3"]["dia"])
 
-        d = effective_depth(
-            h, cover, db,
-            stirrup_dia_in=BAR_DB["#3"]["dia"],
-            tension_face=("bottom" if moment_sign == "positive" else "top")
-        )
-
-        # Required nominal moment initial guess using phi=0.90
-        phi_guess = 0.90
-        Mn_req_kipin = (Mu * 12.0) / phi_guess
-        Mn_req_lbin = Mn_req_kipin * 1000.0
-
-        # Iterate bar count (small integers) to satisfy strength
-        for n in range(2, 16):  # teaching range
+        # iterate bar count
+        for n in range(2, 16):
             As = n * Ab
 
             if not is_t:
-                # Rectangular: use b = b_in
                 b_rect = inp["b_in"] if inp["b_in"] is not None else bw
                 a = As * fy / (0.85 * fc * b_rect)
                 ybar = a / 2.0
             else:
-                # Need bw,hf,bf for positive T-beam compression block
                 if moment_sign == "negative":
-                    # flange in tension -> compression in web (teaching simplification)
+                    # teaching simplification: compression in web
                     b_rect = bw
                     a = As * fy / (0.85 * fc * b_rect)
                     ybar = a / 2.0
                 else:
-                    # Positive: T-beam compression block
                     if (bw is None) or (bf is None) or (hf is None):
                         continue
                     a = solve_a_from_As_Tbeam(As, fy, fc, bw=bw, bf=bf, hf=hf)
-                    _C, ybar, _ = tbeam_compression_resultant(fc, bw=bw, bf=bf, hf=hf, a=a)
+                    _C, ybar = tbeam_compression_resultant(fc, bw=bw, bf=bf, hf=hf, a=a)
 
-            # Nominal moment Mn = T*(d - ybar)
+            # nominal moment
             T = As * fy
             Mn_lbin = T * (d - ybar)
             Mn_kipft = Mn_lbin / (1000.0 * 12.0)
 
-            # Strain compatibility for eps_t (approx for T-beam when a>hf)
             c = a / beta1 if beta1 > 0 else 0.0
             eps_t = 0.003 * (d - c) / c if c > 1e-9 else 0.0
             phi = phi_flexure_from_eps_t(eps_t, fy)
             phiMn = phi * Mn_kipft
 
-            # As,min (use web/rect width for this teaching check)
             b_for_Asmin = inp["b_in"] if inp["b_in"] is not None else bw
             Asmin = As_min_beam_us(fc, fy, b_for_Asmin, d)
 
-            strength_ok = phiMn >= Mu
-            asmin_ok = As >= Asmin
-
-            if strength_ok:
-                score = (0 if asmin_ok else 1, n, As)  # prefer Asmin OK, fewer bars, smaller As
+            if phiMn >= Mu:
+                score = (0 if As >= Asmin else 1, n, As)
                 cand = {
                     "shape": "T-beam" if is_t else "Rectangular",
                     "moment_sign": moment_sign,
@@ -512,7 +459,7 @@ def flexure_design_beam_general(inp):
                     "n": n,
                     "As_prov": As,
                     "Asmin": Asmin,
-                    "asmin_ok": asmin_ok,
+                    "asmin_ok": (As >= Asmin),
                     "d_in": d,
                     "a_in": a,
                     "c_in": c,
@@ -521,40 +468,36 @@ def flexure_design_beam_general(inp):
                     "Mn_kipft": Mn_kipft,
                     "phiMn_kipft": phiMn,
                     "ybar_in": ybar,
-                    "bw_in": bw,
+                    "bw_in": bw if bw is not None else inp["b_in"],
                     "bf_in": bf,
                     "hf_in": hf,
+                    "h_in": h,
+                    "b_in": inp["b_in"] if inp["b_in"] is not None else bw,
+                    "cover_in": cover,
+                    "stirrup_dia_in": BAR_DB["#3"]["dia"],
+
                     "auto_beff": inp.get("auto_beff", False),
                     "bf_auto_in": bf_auto,
                     "bf_auto_used": auto_bf_used,
                 }
                 if best is None or score < best[1]:
                     best = (cand, score)
-                break  # smallest n for this bar size that works
+                break
 
     if best is None:
         warnings.append("Flexure design could not find a bar arrangement satisfying ϕMn ≥ Mu under current assumptions.")
         return None, warnings, steps
 
-    steps.append("Beam flexure skill: handled Rect/T-beam and positive/negative moment; searched bars to satisfy ϕMn ≥ Mu.")
-    if is_t and inp.get("auto_beff", False):
-        if best[0].get("bf_auto_used", False):
-            steps.append(f"Auto beff: computed bf ≈ {best[0]['bf_auto_in']:.1f} in from Ln and sw.")
-        elif best[0].get("bf_auto_in") is not None:
-            steps.append(f"Auto beff: computed bf ≈ {best[0]['bf_auto_in']:.1f} in (but user bf was used).")
-        else:
-            steps.append("Auto beff: ON but bf could not be computed (missing Ln/sw).")
-
+    steps.append("Beam flexure: searched bar sizes/counts to satisfy ϕMn ≥ Mu (Rect/T; +/- moment; Auto beff optional).")
     return best[0], warnings, steps
 
 
 # ============================================================
-# Beam shear skill (one-way) — can run standalone
+# Beam shear skill (ACI beam shear; one-way vertical shear)
 # ============================================================
 
 def shear_design_beam(inp, d_in: float | None):
-    steps = []
-    warnings = []
+    steps, warnings = [], []
 
     Vu = inp["Vu_kips"]
     fc = inp["fc_psi"]
@@ -566,7 +509,7 @@ def shear_design_beam(inp, d_in: float | None):
 
     phi_v = 0.75
 
-    # If d not provided (shear-only mode), estimate from main bars
+    # shear-only: estimate d from main bars
     if d_in is None:
         main_bar = inp["long_bar"] if (inp["long_bar"] in BAR_DB) else "#8"
         db = BAR_DB[main_bar]["dia"]
@@ -585,7 +528,6 @@ def shear_design_beam(inp, d_in: float | None):
 
     Av_over_s_min = shear_Av_over_s_min_us(fc, fy, bw)
     Vu_trigger = phi_v * math.sqrt(fc) * bw * d_in / 1000.0  # teaching trigger
-
     needs_min = Vu > Vu_trigger
 
     Vn_req = Vu / phi_v
@@ -595,7 +537,7 @@ def shear_design_beam(inp, d_in: float | None):
         if needs_min:
             s_from_min = Av / Av_over_s_min
             s_use = min(s_from_min, s_cap)
-            steps.append("Beam shear skill: Vu ≤ ϕVc but min stirrups triggered (teaching).")
+            steps.append("Beam shear: Vu ≤ ϕVc, but minimum stirrups triggered (teaching).")
             return {
                 "phi_v": phi_v, "d_in": d_in, "bw_in": bw,
                 "Vc_kips": Vc, "phiVc_kips": phiVc,
@@ -605,7 +547,7 @@ def shear_design_beam(inp, d_in: float | None):
                 "Vs_req_kips": 0.0
             }, warnings, steps
 
-        steps.append("Beam shear skill: Vu ≤ ϕVc (baseline).")
+        steps.append("Beam shear: Vu ≤ ϕVc (baseline).")
         return {
             "phi_v": phi_v, "d_in": d_in, "bw_in": bw,
             "Vc_kips": Vc, "phiVc_kips": phiVc,
@@ -615,7 +557,6 @@ def shear_design_beam(inp, d_in: float | None):
             "Vs_req_kips": 0.0
         }, warnings, steps
 
-    # Strength stirrup spacing
     Vs_req_lb = Vs_req * 1000.0
     s_strength = (Av * fy * d_in) / Vs_req_lb
     s_from_min = Av / Av_over_s_min
@@ -625,7 +566,7 @@ def shear_design_beam(inp, d_in: float | None):
     if needs_min and (Av / s_use) + 1e-12 < Av_over_s_min:
         warnings.append("Cannot satisfy Av/s(min) with current stirrup size/legs and spacing cap. Increase stirrup size or legs.")
 
-    steps.append("Beam shear skill: computed Vc and Vs; sized stirrups; enforced s cap and Av/s(min) (teaching).")
+    steps.append("Beam shear: computed Vc and Vs; sized stirrups; enforced s cap and Av/s(min) (teaching).")
     return {
         "phi_v": phi_v, "d_in": d_in, "bw_in": bw,
         "Vc_kips": Vc, "phiVc_kips": phiVc,
@@ -716,7 +657,6 @@ def column_interaction_curve_rect_tied_perimeter(b_in: float, h_in: float, cover
 
         Psteel = 0.0
         Msteel = 0.0
-        eps_t_min = None
 
         for (_x, y) in bars:
             eps = 0.003 * (c - y) / c
@@ -724,12 +664,10 @@ def column_interaction_curve_rect_tied_perimeter(b_in: float, h_in: float, cover
             Fs = fs * Ab
             Psteel += Fs
             Msteel += Fs * (y - y_cg)
-            if eps_t_min is None or eps < eps_t_min:
-                eps_t_min = eps
 
         Pn = (Cc + Psteel) / 1000.0
         Mn = abs(Cc * (y_cc - y_cg) + Msteel) / (1000.0 * 12.0)
-        curve.append((Pn, Mn, eps_t_min))
+        curve.append((Pn, Mn))
 
     curve.sort(key=lambda x: -x[0])
     return curve
@@ -751,8 +689,7 @@ def _interp_M_at_P(P_req, Ps, Ms):
     return None
 
 def column_design_tied(inp):
-    steps = []
-    warnings = []
+    steps, warnings = [], []
 
     b, h = inp["b_in"], inp["h_in"]
     Pu, Mu = inp["Pu_kips"], inp["Mu_col_kipft"]
@@ -774,7 +711,7 @@ def column_design_tied(inp):
     n_trials = [16, 12, 8, 4]
 
     best = None
-    phi = 0.65  # conservative teaching for tied columns
+    phi = 0.65  # teaching conservative
     P_req = Pu / phi
 
     for bar in bar_trials:
@@ -789,8 +726,8 @@ def column_design_tied(inp):
             curve = column_interaction_curve_rect_tied_perimeter(
                 b, h, cover, fc, fy, bar_size=bar, n_bars=n_bars, tie_size=tie_size
             )
-            Ps = [p for p, _m, _e in curve]
-            Ms = [m for _p, m, _e in curve]
+            Ps = [p for p, _m in curve]
+            Ms = [m for _p, m in curve]
 
             Mn_req = _interp_M_at_P(P_req, Ps, Ms)
             if Mn_req is None:
@@ -811,7 +748,6 @@ def column_design_tied(inp):
                     "ok": ok,
                     "tie_size": tie_size,
                     "s_tie_max_in": smax,
-                    "curve": curve,
                 }
                 break
         if best is not None:
@@ -821,8 +757,8 @@ def column_design_tied(inp):
         warnings.append("No column trial passed Pu–Mu while meeting 1%–8% steel ratio (teaching).")
         return None, warnings, steps
 
-    steps.append("Column skill: selected perimeter rebar layout and checked Pu–Mu via interaction diagram (teaching).")
-    steps.append("Column skill: checked tie spacing limit (teaching).")
+    steps.append("Column: selected perimeter rebar + checked Pu–Mu using an interaction-style curve (teaching).")
+    steps.append("Column: reported tie spacing limit (teaching).")
     return best, warnings, steps
 
 
@@ -831,8 +767,7 @@ def column_design_tied(inp):
 # ============================================================
 
 def slab_design_one_way(inp):
-    steps = []
-    warnings = []
+    steps, warnings = [], []
 
     t_in = inp["slab_t_in"]
     L_ft = inp["slab_L_ft"]
@@ -843,44 +778,35 @@ def slab_design_one_way(inp):
     if None in (t_in, L_ft, wu_psf):
         return None, ["Missing slab inputs (t, L, wu)."], steps
 
-    # 12-in strip
     b = 12.0
     h = t_in
 
-    # Support model (teaching)
-    # Simply supported: Mu = wL^2/8
-    # Continuous interior (teaching): Mu = wL^2/12
-    w_plf = wu_psf * 1.0  # 1 ft tributary width for 12-in strip
+    w_plf = wu_psf * 1.0
     if inp["slab_support"] == "continuous":
-        Mu_kipft = (w_plf * (L_ft**2) / 12.0) / 1000.0
+        Mu_kipft = (w_plf * (L_ft ** 2) / 12.0) / 1000.0
         support_note = "continuous interior (teaching): wL^2/12"
     else:
-        Mu_kipft = (w_plf * (L_ft**2) / 8.0) / 1000.0
+        Mu_kipft = (w_plf * (L_ft ** 2) / 8.0) / 1000.0
         support_note = "simply supported: wL^2/8"
 
-    # Assume #4 bars for initial depth estimate
-    main_bar = "#4"
-    db = BAR_DB[main_bar]["dia"]
-    d = effective_depth(h, cover, db, stirrup_dia_in=0.0)
-
-    # Search bar spacing (#4 or #5)
     phi = 0.90
     candidates = []
     for bar in ["#4", "#5"]:
         Ab = BAR_DB[bar]["area"]
         db = BAR_DB[bar]["dia"]
-        d = effective_depth(h, cover, db, stirrup_dia_in=0.0)
+        # slab: no stirrups
+        d = h - cover - 0.5 * db
         if d <= 0:
             continue
 
         for s in range(4, 19):
-            As_per_ft = Ab * (12.0 / s)  # in^2/ft
-            As = As_per_ft  # for 12-in strip
+            As_per_ft = Ab * (12.0 / s)
+            As = As_per_ft
 
             a = As * fy / (0.85 * fc * b)
             ybar = a / 2.0
             Mn = (As * fy) * (d - ybar)  # lb-in
-            phiMn = phi * (Mn / (1000.0 * 12.0))  # kip-ft
+            phiMn = phi * (Mn / (1000.0 * 12.0))
 
             if phiMn >= Mu_kipft:
                 candidates.append({
@@ -897,11 +823,11 @@ def slab_design_one_way(inp):
                 break
 
     if not candidates:
-        warnings.append("Slab design: could not find simple #4/#5 spacing to satisfy moment under assumptions.")
+        warnings.append("Slab: could not find #4/#5 spacing to satisfy moment under assumptions.")
         return None, warnings, steps
 
     best = sorted(candidates, key=lambda x: (-x["s_in"], x["bar"]))[0]
-    steps.append("One-way slab skill: 12-in strip moment + simple bar-spacing search to satisfy ϕMn ≥ Mu (teaching).")
+    steps.append("Slab: 1-ft strip + simple bar-spacing search to satisfy ϕMn ≥ Mu (teaching).")
     return best, warnings, steps
 
 
@@ -915,19 +841,18 @@ def narrative_beam_flexure(inp, f):
     lines.append(clear_cover_definition_note())
     lines.append(f"Shape: {f['shape']}, moment: {f['moment_sign']}")
     if f["shape"] == "T-beam":
-        lines.append(f"T-beam inputs: bw={f['bw_in']} in, bf={f['bf_in']} in, hf={f['hf_in']} in")
+        lines.append(f"T-beam: bw={f['bw_in']} in, bf={f['bf_in']} in, hf={f['hf_in']} in")
         if f.get("auto_beff", False):
             if f.get("bf_auto_used", False):
-                lines.append(f"Auto beff ON: computed bf ≈ {f.get('bf_auto_in'):.1f} in from Ln and sw.")
+                lines.append(f"Auto beff ON: bf computed ≈ {f.get('bf_auto_in'):.1f} in from Ln and sw.")
             elif f.get("bf_auto_in") is not None:
-                lines.append(f"Auto beff ON: computed bf ≈ {f.get('bf_auto_in'):.1f} in (your bf input used instead).")
+                lines.append(f"Auto beff ON: bf_auto ≈ {f.get('bf_auto_in'):.1f} in (user bf used).")
             else:
                 lines.append("Auto beff ON: could not compute bf (need Ln and sw).")
-        lines.append("Note: For real design, bf should comply with ACI effective flange width limits; this demo uses provided/auto bf.")
     lines.append(f"f'c={inp['fc_psi']/1000:.2f} ksi, fy={inp['fy_psi']/1000:.0f} ksi")
     lines.append(f"Mu={inp['Mu_kipft']:.2f} kip-ft")
     lines.append(f"Selected: {f['n']} {f['bar']} bars -> As={f['As_prov']:.2f} in^2 (As,min={f['Asmin']:.2f} in^2)")
-    lines.append(f"d≈{f['d_in']:.2f} in, a={f['a_in']:.2f} in, c≈{f['c_in']:.2f} in, ybar≈{f['ybar_in']:.2f} in")
+    lines.append(f"d≈{f['d_in']:.2f} in, a={f['a_in']:.2f} in, c≈{f['c_in']:.2f} in")
     lines.append(f"εt≈{f['eps_t']:.5f} -> ϕ≈{f['phi']:.3f}")
     lines.append(f"Mn≈{f['Mn_kipft']:.1f} kip-ft; ϕMn≈{f['phiMn_kipft']:.1f} kip-ft")
     lines.append("DISCLAIMER: Teaching demo only.")
@@ -935,7 +860,7 @@ def narrative_beam_flexure(inp, f):
 
 def narrative_beam_shear(inp, sh):
     lines = []
-    lines.append("=== BEAM SHEAR (Teaching) ===")
+    lines.append("=== BEAM SHEAR (ACI beam shear; teaching) ===")
     lines.append(clear_cover_definition_note())
     lines.append(f"f'c={inp['fc_psi']/1000:.2f} ksi, fy={inp['fy_psi']/1000:.0f} ksi")
     lines.append(f"Vu={inp['Vu_kips']:.2f} kips, bw={sh['bw_in']:.1f} in, d≈{sh['d_in']:.2f} in")
@@ -944,7 +869,6 @@ def narrative_beam_shear(inp, sh):
         lines.append("Stirrups not required by strength in baseline; minimum reinforcement may still govern depending on region.")
     else:
         lines.append(f"Provide {sh['legs']}-leg {sh['stirrup_size']} @ s={sh['s_use_in']:.1f} in (cap={sh['s_cap_in']:.1f} in)")
-        lines.append(f"Av/s(min)≈{sh['Av_over_s_min']:.4f} in^2/in; needs_min={sh['needs_min']}")
     lines.append("DISCLAIMER: Teaching demo only.")
     return "\n".join(lines)
 
@@ -966,13 +890,200 @@ def narrative_slab(inp, sres):
     lines = []
     lines.append("=== ONE-WAY SLAB (Teaching) ===")
     lines.append(f"Support model: {sres['support_note']}")
-    lines.append(f"t={inp['slab_t_in']:.1f} in, cover={inp['cover_in']:.2f} in (typical slab clear cover assumption)")
+    lines.append(f"t={inp['slab_t_in']:.1f} in, cover={inp['cover_in']:.2f} in (typical slab assumption)")
     lines.append(f"f'c={inp['fc_psi']/1000:.2f} ksi, fy={inp['fy_psi']/1000:.0f} ksi")
     lines.append(f"L={inp['slab_L_ft']:.2f} ft, wu={inp['slab_wu_psf']:.1f} psf -> Mu≈{sres['Mu_kipft']:.2f} kip-ft (per 1-ft strip)")
-    lines.append(f"Provide {sres['bar']} @ {sres['s_in']} in o.c. -> As≈{sres['As_in2_per_ft']:.3f} in^2/ft")
+    lines.append(f"Provide {sres['bar']} @ {sres['s_in']} in -> As≈{sres['As_in2_per_ft']:.3f} in^2/ft")
     lines.append(f"d≈{sres['d_in']:.2f} in, ϕ={sres['phi']:.2f}, ϕMn≈{sres['phiMn_kipft']:.2f} kip-ft")
     lines.append("DISCLAIMER: Teaching demo only.")
     return "\n".join(lines)
+
+
+# ============================================================
+# Option B Diagram: section + strain diagram
+# ============================================================
+
+def _draw_section_and_strain(flex: dict):
+    """
+    Advanced teaching figure:
+      Left: cross-section (Rect/T), compression block a, NA c, effective depth d, tension steel.
+      Right: linear strain profile (epsilon) with 0.003 at compression face.
+    """
+    shape = flex.get("shape", "Rectangular")
+    h = float(flex.get("h_in", 24.0))
+    cover = float(flex.get("cover_in", 1.5))
+    stirrup_dia = float(flex.get("stirrup_dia_in", 0.375))
+
+    moment_sign = flex.get("moment_sign", "positive")
+    tension_face = "bottom" if moment_sign == "positive" else "top"
+    compression_face = "top" if tension_face == "bottom" else "bottom"
+
+    bar = flex.get("bar", "#8")
+    db = BAR_DB.get(bar, BAR_DB["#8"])["dia"]
+    n_bars = int(flex.get("n", 4))
+
+    a = float(flex.get("a_in", 0.0))
+    c = float(flex.get("c_in", 0.0))
+    d = float(flex.get("d_in", h - cover - stirrup_dia - 0.5 * db))
+
+    if shape == "T-beam":
+        bw = float(flex.get("bw_in", 12.0))
+        bf = float(flex.get("bf_in", 36.0))
+        hf = float(flex.get("hf_in", 4.0))
+        b_web = bw
+        b_total = bf
+    else:
+        b_web = float(flex.get("b_in", 12.0))
+        b_total = b_web
+        hf = 0.0
+
+    # Create figure
+    fig = plt.figure(figsize=(9.5, 4.5))
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.1, 0.9])
+    ax = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[0, 1])
+
+    # ----- SECTION DRAWING -----
+    # Concrete outline
+    if shape == "T-beam":
+        # flange
+        flange = patches.Rectangle((-(b_total - b_web)/2.0, h - hf), b_total, hf, fill=False, linewidth=2)
+        web = patches.Rectangle((0, 0), b_web, h - hf, fill=False, linewidth=2)
+        # shift web to align center under flange
+        web.set_x((b_total - b_web)/2.0)
+        flange.set_x(0.0)
+        ax.add_patch(web)
+        ax.add_patch(flange)
+        x0 = 0.0
+        y0 = 0.0
+        sec_left = 0.0
+        sec_right = b_total
+        web_left = (b_total - b_web)/2.0
+        web_right = web_left + b_web
+    else:
+        rect = patches.Rectangle((0, 0), b_total, h, fill=False, linewidth=2)
+        ax.add_patch(rect)
+        sec_left, sec_right = 0.0, b_total
+        web_left, web_right = sec_left, sec_right
+
+    # Compression block a (from compression face)
+    # We'll draw it as shaded rectangle (no color specification required; default gray)
+    if a > 0 and a < h:
+        if compression_face == "top":
+            y_comp0 = h - a
+            height_comp = a
+        else:
+            y_comp0 = 0.0
+            height_comp = a
+
+        # For T-beam: approximate compression block width as bf (teaching visual)
+        comp_width = b_total if (shape == "T-beam" and tension_face == "bottom") else b_web
+        comp_left = sec_left if comp_width == b_total else web_left
+
+        comp = patches.Rectangle((comp_left, y_comp0), comp_width, height_comp, fill=True, alpha=0.15, linewidth=0)
+        ax.add_patch(comp)
+
+        # Label a
+        ax.annotate(
+            f"a={a:.2f} in",
+            xy=(sec_right + 0.3, (y_comp0 + height_comp/2)),
+            va="center"
+        )
+
+    # Neutral axis at depth c from compression face
+    if c > 0 and c < h:
+        y_na = (h - c) if compression_face == "top" else c
+        ax.plot([sec_left, sec_right], [y_na, y_na], linestyle="--", linewidth=1.5)
+        ax.annotate(
+            f"c={c:.2f} in (NA)",
+            xy=(sec_right + 0.3, y_na),
+            va="center"
+        )
+
+    # Tension steel layer position
+    if tension_face == "bottom":
+        y_steel = cover + stirrup_dia + 0.5 * db
+        y_steel = max(y_steel, 0.6)
+        y_steel = min(y_steel, h - 0.6)
+        # show d from top compression face
+        y_d_start = h
+        y_d_end = y_steel
+    else:
+        y_steel = h - (cover + stirrup_dia + 0.5 * db)
+        y_steel = max(y_steel, 0.6)
+        y_steel = min(y_steel, h - 0.6)
+        # compression at bottom -> d from bottom
+        y_d_start = 0.0
+        y_d_end = y_steel
+
+    # distribute bars across web width
+    bar_left = web_left + 0.8
+    bar_right = web_right - 0.8
+    if n_bars == 1:
+        xs = [(bar_left + bar_right)/2.0]
+    else:
+        xs = [bar_left + i*(bar_right - bar_left)/(n_bars-1) for i in range(n_bars)]
+
+    for x in xs:
+        circ = patches.Circle((x, y_steel), radius=max(0.18, 0.18*db), fill=True)
+        ax.add_patch(circ)
+
+    ax.annotate(f"{n_bars} {bar} (tension)", xy=(sec_left, y_steel), xytext=(sec_left, y_steel - 1.2))
+
+    # Effective depth d indicator
+    ax.annotate("", xy=(sec_right + 0.1, y_d_start), xytext=(sec_right + 0.1, y_d_end),
+                arrowprops=dict(arrowstyle="<->"))
+    ax.annotate(f"d≈{d:.2f} in", xy=(sec_right + 0.3, (y_d_start + y_d_end)/2), va="center")
+
+    # Formatting
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlim(sec_left - 1.0, sec_right + 6.0)
+    ax.set_ylim(-1.0, h + 1.0)
+    ax.axis("off")
+    ax.set_title("Section Sketch (Teaching)")
+
+    # ----- STRAIN DIAGRAM -----
+    # linear strain: 0.003 at compression face, 0 at NA, tension at steel
+    # We'll plot epsilon vs y (y measured from section bottom)
+    ax2.axvline(0, linewidth=1)
+
+    # Define y coordinate and epsilon profile
+    # Choose compression face strain = +0.003, tension negative (plotted left)
+    if c <= 0 or c >= h:
+        # fallback: just show a generic triangle
+        y_vals = [0, h]
+        eps_vals = [-0.005, 0.003]
+    else:
+        if compression_face == "top":
+            # y= h at top, y=0 at bottom; NA at y_na
+            y_na = h - c
+            # compression at top: +0.003; at NA: 0; at steel: eps_t (negative)
+            eps_t = float(flex.get("eps_t", 0.0))
+            y_vals = [h, y_na, y_steel]
+            eps_vals = [0.003, 0.0, -abs(eps_t)]
+        else:
+            # compression at bottom
+            y_na = c
+            eps_t = float(flex.get("eps_t", 0.0))
+            y_vals = [0.0, y_na, y_steel]
+            eps_vals = [0.003, 0.0, -abs(eps_t)]
+
+    ax2.plot(eps_vals, y_vals, linewidth=2)
+    ax2.scatter(eps_vals, y_vals, s=25)
+
+    ax2.set_ylim(-1.0, h + 1.0)
+    ax2.set_xlim(-0.01, 0.0045)
+    ax2.set_xlabel("Strain, ε")
+    ax2.set_ylabel("y (in)")
+    ax2.set_title("Strain Diagram (Teaching)")
+    ax2.grid(True, alpha=0.2)
+
+    # Labels
+    ax2.text(0.003, (h if compression_face == "top" else 0.0), " 0.003 (εcu)", va="center")
+    ax2.text(-abs(float(flex.get("eps_t", 0.0))), y_steel, " εt", va="center")
+
+    fig.tight_layout()
+    return fig
 
 
 # ============================================================
@@ -983,7 +1094,7 @@ def agent_run(prompt: str):
     steps = []
     inp, parse_warn = parse_prompt(prompt)
     warnings = list(parse_warn)
-    steps.append("Step 1 — Parse prompt; detect member type and extract inputs.")
+    steps.append("Parse prompt; detect member type and extract inputs.")
 
     if inp["member_type"] == "beam":
         mode = inp["beam_mode"]
@@ -993,7 +1104,7 @@ def agent_run(prompt: str):
         sh = None
 
         if mode in ("flexure", "combined"):
-            steps.append("Step 2 — Beam flexure skill (Rect/T-beam; positive/negative moment; optional Auto beff).")
+            steps.append("Run beam flexure skill (Rect/T; +/- moment; Auto beff optional).")
             flex, w, s = flexure_design_beam_general(inp)
             warnings += w
             steps += s
@@ -1002,7 +1113,7 @@ def agent_run(prompt: str):
                 results["flexure_narrative"] = narrative_beam_flexure(inp, flex)
 
         if mode in ("shear", "combined"):
-            steps.append("Step 3 — Beam shear skill (one-way).")
+            steps.append("Run beam shear skill (ACI beam shear; teaching).")
             d_for_shear = flex["d_in"] if flex is not None else None
             sh, w, s = shear_design_beam(inp, d_for_shear)
             warnings += w
@@ -1016,27 +1127,27 @@ def agent_run(prompt: str):
         if (mode in ("shear", "combined")) and sh is None:
             return None, warnings, steps
 
-        steps.append("Done — Beam workflow completed.")
+        steps.append("Done — beam workflow completed.")
         return results, warnings, steps
 
     if inp["member_type"] == "column":
-        steps.append("Step 2 — Column skill (interaction diagram + rho limits + tie spacing).")
+        steps.append("Run column skill (teaching interaction + detailing limits).")
         col, w, s = column_design_tied(inp)
         warnings += w
         steps += s
         if col is None:
             return None, warnings, steps
-        steps.append("Done — Column workflow completed.")
+        steps.append("Done — column workflow completed.")
         return {"member_type": "column", "inputs": inp, "column": col, "narrative": narrative_column(inp, col)}, warnings, steps
 
     # slab
-    steps.append("Step 2 — One-way slab skill (12-in strip).")
+    steps.append("Run one-way slab skill (1-ft strip; teaching).")
     sres, w, s = slab_design_one_way(inp)
     warnings += w
     steps += s
     if sres is None:
         return None, warnings, steps
-    steps.append("Done — One-way slab workflow completed.")
+    steps.append("Done — slab workflow completed.")
     return {"member_type": "slab", "inputs": inp, "slab": sres, "narrative": narrative_slab(inp, sres)}, warnings, steps
 
 
@@ -1044,144 +1155,211 @@ def agent_run(prompt: str):
 # Streamlit UI
 # ============================================================
 
-st.set_page_config(page_title="ACI 318-19 RC Agent Demo", layout="wide")
-st.title("ACI 318-19 RC Design Copilot — (Agent + Skills)")
+st.set_page_config(page_title="ACI 318-19 RC Design Agent", layout="wide")
+st.title("ACI 318-19 RC Design Copilot Demo (Agent + Skills)")
 st.caption("Teaching demo only — simplified/incomplete checks. Not for real design/stamping.")
 
-left, right = st.columns([1, 1])
+# Example prompts (kept in main so sidebar can reference)
+EXAMPLES = {
+    "Beam Flexure (Rect, positive)":
+        "Beam flexure: Design a 12x24 rectangular beam, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
+        "Mu=180 kip-ft, positive moment, use #8 max bars.",
 
-with left:
-    st.subheader("Natural-language prompt")
+    "Beam Flexure (T-beam, positive, manual bf)":
+        "Beam flexure: Design a T-beam bw=12 in h=28 in bf=48 in hf=4 in, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
+        "Mu=220 kip-ft, positive moment, use #8 max bars.",
 
-    example_prompts = {
-        "Beam Flexure (Rect, positive)":
-            "Beam flexure: Design a 12x24 rectangular beam, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
-            "Mu=180 kip-ft, positive moment, use #8 max bars.",
+    "Beam Flexure (T-beam, Auto beff)":
+        "Beam flexure: Design a T-beam bw=12 in h=28 in hf=4 in, auto beff, Ln=24 ft, sw=72 in, "
+        "cover 1.5 in, fc=4 ksi, fy=60 ksi, Mu=220 kip-ft, positive moment, use #8 max bars.",
 
-        "Beam Flexure (T-beam, positive, manual bf)":
-            "Beam flexure: Design a T-beam bw=12 in h=28 in bf=48 in hf=4 in, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
-            "Mu=220 kip-ft, positive moment, use #8 max bars.",
+    "Beam Flexure (T-beam, negative)":
+        "Beam flexure: Design a T-beam bw=12 in h=28 in bf=48 in hf=4 in, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
+        "Mu=180 kip-ft, negative moment, use #8 max bars.",
 
-        "Beam Flexure (T-beam, Auto beff)":
-            "Beam flexure: Design a T-beam bw=12 in h=28 in hf=4 in, auto beff, Ln=24 ft, sw=72 in, "
-            "cover 1.5 in, fc=4 ksi, fy=60 ksi, Mu=220 kip-ft, positive moment, use #8 max bars.",
+    "Beam Shear (standalone)":
+        "Beam shear: Design shear for a 12x24 beam, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
+        "Vu=70 kips, main bars #8, stirrups #3.",
 
-        "Beam Flexure (T-beam, negative)":
-            "Beam flexure: Design a T-beam bw=12 in h=28 in bf=48 in hf=4 in, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
-            "Mu=180 kip-ft, negative moment, use #8 max bars.",
+    "Beam Flexure + Shear":
+        "Design a 12x24 beam, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
+        "Mu=180 kip-ft, Vu=70 kips, positive moment, use #8 max bars, stirrups #3.",
 
-        "Beam Shear (standalone)":
-            "Beam shear: Design shear for a 12x24 beam, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
-            "Vu=70 kips, main bars #8, stirrups #3.",
+    "Column (tied)":
+        "Design a 16x16 tied column, cover 1.5 in, fc=5 ksi, fy=60 ksi, "
+        "Pu=350 kips, Mu=120 kip-ft, use #8 bars, ties #3.",
 
-        "Beam Flexure + Shear":
-            "Design a 12x24 beam, cover 1.5 in, fc=4 ksi, fy=60 ksi, "
-            "Mu=180 kip-ft, Vu=70 kips, positive moment, use #8 max bars, stirrups #3.",
+    "One-way slab":
+        "One-way slab design: t=8 in, cover 0.75 in, fc=4 ksi, fy=60 ksi, "
+        "L=15 ft, wu=120 psf, simply supported.",
+}
 
-        "Column (tied)":
-            "Design a 16x16 tied column, cover 1.5 in, fc=5 ksi, fy=60 ksi, "
-            "Pu=350 kips, Mu=120 kip-ft, use #8 bars, ties #3.",
+# Session state init
+if "prompt_text" not in st.session_state:
+    st.session_state.prompt_text = EXAMPLES["Beam Flexure (Rect, positive)"]
+if "show_thinking" not in st.session_state:
+    st.session_state.show_thinking = True
+if "show_diagrams" not in st.session_state:
+    st.session_state.show_diagrams = True
 
-        "One-way slab":
-            "One-way slab design: t=8 in, cover 0.75 in, fc=4 ksi, fy=60 ksi, "
-            "L=15 ft, wu=120 psf, simply supported."
-    }
+# ----------------------------
+# SIDEBAR
+# ----------------------------
+st.sidebar.title("RC Design Copilot")
+st.sidebar.caption("Inputs / Examples (ENCE 2530 & ENCE 3680)")
 
-    if "prompt_text" not in st.session_state:
-        st.session_state.prompt_text = example_prompts["Beam Flexure (Rect, positive)"]
+choice = st.sidebar.selectbox("Example prompt", list(EXAMPLES.keys()))
+rowA = st.sidebar.columns(2)
+load_example = rowA[0].button("Load Example", use_container_width=True)
+reset_prompt = rowA[1].button("Reset", use_container_width=True)
 
-    st.write("### Example prompts")
-    cols = st.columns(2)
-    keys = list(example_prompts.keys())
-    for i, k in enumerate(keys):
-        if cols[i % 2].button(k):
-            st.session_state.prompt_text = example_prompts[k]
+if load_example:
+    st.session_state.prompt_text = EXAMPLES[choice]
+if reset_prompt:
+    st.session_state.prompt_text = EXAMPLES["Beam Flexure (Rect, positive)"]
 
-    prompt = st.text_area("Prompt", value=st.session_state.prompt_text, height=220)
-    run = st.button("Run Agent")
+st.sidebar.markdown("---")
+prompt = st.sidebar.text_area("Prompt", value=st.session_state.prompt_text, height=230)
 
-with right:
-    st.subheader("Agent Output")
-    if run:
-        with st.spinner("Agent is thinking..."):
+st.session_state.show_thinking = st.sidebar.checkbox("Show agent thinking panel", value=st.session_state.show_thinking)
+st.session_state.show_diagrams = st.sidebar.checkbox("Show diagrams (section + strain)", value=st.session_state.show_diagrams)
+
+st.sidebar.markdown("---")
+rowB = st.sidebar.columns(2)
+run = rowB[0].button("▶ Run Agent", use_container_width=True)
+clear = rowB[1].button("🧹 Clear Output", use_container_width=True)
+
+# Output state
+if "last_result" not in st.session_state:
+    st.session_state.last_result = None
+if "last_warnings" not in st.session_state:
+    st.session_state.last_warnings = []
+if "last_steps" not in st.session_state:
+    st.session_state.last_steps = []
+
+if clear:
+    st.session_state.last_result = None
+    st.session_state.last_warnings = []
+    st.session_state.last_steps = []
+
+# ----------------------------
+# MAIN PANEL
+# ----------------------------
+st.markdown("### Output")
+
+if run:
+    # Progress / status + spinner
+    with st.spinner("Agent is thinking..."):
+        with st.status("Agent progress", expanded=True) as status:
+            status.write("Parsing prompt...")
+            # Run agent
             result, warnings, steps = agent_run(prompt)
+            status.write("Finalizing results...")
+            status.update(label="Agent finished", state="complete", expanded=False)
 
+    st.session_state.last_result = result
+    st.session_state.last_warnings = warnings
+    st.session_state.last_steps = steps
+
+# Render latest output
+result = st.session_state.last_result
+warnings = st.session_state.last_warnings
+steps = st.session_state.last_steps
+
+if result is None:
+    st.info("Run the agent using the sidebar. Results will appear here.")
+else:
+    st.success(f"Completed: {result['member_type'].upper()}")
+
+    if st.session_state.show_thinking:
         with st.expander("🧠 Agent Thinking (step-by-step)", expanded=True):
             for s in steps:
-                st.write(s)
+                st.write(f"- {s}")
 
-        if result is None:
-            st.error("Agent could not complete the task. See warnings and try adjusting inputs.")
-        else:
-            st.success(f"Completed: {result['member_type'].upper()}")
+    # Beam output
+    if result["member_type"] == "beam":
+        colL, colR = st.columns([1.15, 0.85], gap="large")
 
-            if result["member_type"] == "beam":
-                if "flexure_narrative" in result:
-                    st.markdown("### Beam Flexure Narrative")
-                    st.code(result["flexure_narrative"])
-                if "shear_narrative" in result:
-                    st.markdown("### Beam Shear Narrative")
-                    st.code(result["shear_narrative"])
+        with colL:
+            if "flexure_narrative" in result:
+                st.markdown("#### Beam Flexure Narrative")
+                st.code(result["flexure_narrative"])
+            if "shear_narrative" in result:
+                st.markdown("#### Beam Shear Narrative")
+                st.code(result["shear_narrative"])
 
-                st.markdown("### Key outputs")
-                out = {}
-                if "flexure" in result:
-                    f = result["flexure"]
-                    out.update({
-                        "Flexure shape": f["shape"],
-                        "Moment sign": f["moment_sign"],
-                        "Bars": f"{f['n']} {f['bar']}",
-                        "As (in^2)": round(f["As_prov"], 2),
-                        "d (in)": round(f["d_in"], 2),
-                        "phi": round(f["phi"], 3),
-                        "phiMn (kip-ft)": round(f["phiMn_kipft"], 1),
-                    })
-                    if f["shape"] == "T-beam":
-                        out.update({
-                            "bw (in)": f["bw_in"],
-                            "bf (in)": f["bf_in"],
-                            "hf (in)": f["hf_in"],
-                            "Auto beff?": f.get("auto_beff", False),
-                            "bf_auto (in)": (None if f.get("bf_auto_in") is None else round(f["bf_auto_in"], 1)),
-                            "bf_auto used?": f.get("bf_auto_used", False),
-                        })
-                if "shear" in result:
-                    sh = result["shear"]
-                    out.update({
-                        "Vu (kips)": result["inputs"]["Vu_kips"],
-                        "Vc (kips)": round(sh["Vc_kips"], 1),
-                        "phiVc (kips)": round(sh["phiVc_kips"], 1),
-                        "Stirrups": ("N/A" if sh["s_use_in"] is None else f"{sh['legs']}-leg {sh['stirrup_size']} @ {sh['s_use_in']:.1f} in"),
-                    })
-                st.write(out)
-
-            elif result["member_type"] == "column":
-                st.markdown("### Narrative")
-                st.code(result["narrative"])
-                c = result["column"]
-                st.markdown("### Key outputs")
-                st.write({
-                    "Bars": f"{c['n_bars']} {c['bar_size']}",
-                    "rho": round(c["rho"], 3),
-                    "phi": c["phi"],
-                    "phiMn at Pu/phi (kip-ft)": round(c["phiMn_at_Preq"], 1),
-                    "Tie size": c["tie_size"],
-                    "Max tie spacing (in)": round(c["s_tie_max_in"], 1),
-                    "OK?": c["ok"]
+        with colR:
+            st.markdown("#### Key outputs")
+            out = {}
+            if "flexure" in result:
+                f = result["flexure"]
+                out.update({
+                    "Flexure shape": f["shape"],
+                    "Moment sign": f["moment_sign"],
+                    "Bars": f"{f['n']} {f['bar']}",
+                    "As (in^2)": round(f["As_prov"], 2),
+                    "d (in)": round(f["d_in"], 2),
+                    "phi": round(f["phi"], 3),
+                    "phiMn (kip-ft)": round(f["phiMn_kipft"], 1),
                 })
-
-            else:
-                st.markdown("### Narrative")
-                st.code(result["narrative"])
-                sres = result["slab"]
-                st.markdown("### Key outputs")
-                st.write({
-                    "Bars": f"{sres['bar']} @ {sres['s_in']} in",
-                    "As (in^2/ft)": round(sres["As_in2_per_ft"], 3),
-                    "Mu (kip-ft per ft strip)": round(sres["Mu_kipft"], 2),
-                    "phiMn (kip-ft)": round(sres["phiMn_kipft"], 2),
+                if f["shape"] == "T-beam":
+                    out.update({
+                        "bw (in)": f["bw_in"],
+                        "bf (in)": f["bf_in"],
+                        "hf (in)": f["hf_in"],
+                        "Auto beff?": f.get("auto_beff", False),
+                        "bf_auto (in)": (None if f.get("bf_auto_in") is None else round(f["bf_auto_in"], 1)),
+                        "bf_auto used?": f.get("bf_auto_used", False),
+                    })
+            if "shear" in result:
+                sh = result["shear"]
+                out.update({
+                    "Vu (kips)": result["inputs"]["Vu_kips"],
+                    "Vc (kips)": round(sh["Vc_kips"], 1),
+                    "phiVc (kips)": round(sh["phiVc_kips"], 1),
+                    "Stirrups": ("N/A" if sh["s_use_in"] is None else f"{sh['legs']}-leg {sh['stirrup_size']} @ {sh['s_use_in']:.1f} in"),
                 })
+            st.write(out)
 
-        st.markdown("### Warnings / Assumptions")
+        # Option B diagram (section + strain)
+        if st.session_state.show_diagrams and "flexure" in result:
+            st.markdown("### Diagrams")
+            fig = _draw_section_and_strain(result["flexure"])
+            st.pyplot(fig, use_container_width=True)
+
+    # Column output
+    elif result["member_type"] == "column":
+        st.markdown("#### Narrative")
+        st.code(result["narrative"])
+        c = result["column"]
+        st.markdown("#### Key outputs")
+        st.write({
+            "Bars": f"{c['n_bars']} {c['bar_size']}",
+            "rho": round(c["rho"], 3),
+            "phi": c["phi"],
+            "phiMn at Pu/phi (kip-ft)": round(c["phiMn_at_Preq"], 1),
+            "Tie size": c["tie_size"],
+            "Max tie spacing (in)": round(c["s_tie_max_in"], 1),
+            "OK?": c["ok"]
+        })
+
+    # Slab output
+    else:
+        st.markdown("#### Narrative")
+        st.code(result["narrative"])
+        sres = result["slab"]
+        st.markdown("#### Key outputs")
+        st.write({
+            "Bars": f"{sres['bar']} @ {sres['s_in']} in",
+            "As (in^2/ft)": round(sres["As_in2_per_ft"], 3),
+            "Mu (kip-ft per ft strip)": round(sres["Mu_kipft"], 2),
+            "phiMn (kip-ft)": round(sres["phiMn_kipft"], 2),
+        })
+
+    # Warnings
+    st.markdown("### Warnings / Assumptions")
+    if warnings:
         for w in warnings:
             st.warning(w)
+    else:
+        st.write("No warnings.")
